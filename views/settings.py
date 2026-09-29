@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pandas as pd
 import streamlit as st
 
 from core import db
@@ -117,6 +118,49 @@ def render(q: str = "") -> None:
                 st.rerun()
             except ValueError as e:
                 st.error(str(e))
+
+    lm, rm = st.columns([1.5, 1])
+    with lm.container(key="card_set_materials"):
+        card_title("Malzeme Cinsleri ve Yoğunluklar")
+        st.caption("Malzeme Bileşenleri'nde hammadde eklerken bu listeden cins seçilir. Yoğunluğu değiştirirsen "
+                   "mevcut tüm hammaddelerin kilo ve maliyeti otomatik yeniden hesaplanır.")
+        mt = pd.DataFrame(db.get_material_types()).rename(columns={"name": "Malzeme Cinsi", "density": "Yoğunluk (g/cm³)"})
+        if mt.empty:
+            mt = pd.DataFrame({"Malzeme Cinsi": pd.Series(dtype=str), "Yoğunluk (g/cm³)": pd.Series(dtype=float)})
+        with st.form("mat_types_form", border=False):
+            edited = st.data_editor(
+                mt, num_rows="dynamic", hide_index=True, width="stretch", key="mat_types_editor",
+                column_config={
+                    "Malzeme Cinsi": st.column_config.TextColumn(required=True),
+                    "Yoğunluk (g/cm³)": st.column_config.NumberColumn(min_value=0.01, max_value=30.0,
+                                                                     step=0.01, format="%.2f", required=True),
+                })
+            if st.form_submit_button("Kaydet", type="primary"):
+                rows = [{"name": str(r["Malzeme Cinsi"]).strip(), "density": float(r["Yoğunluk (g/cm³)"])}
+                        for _, r in edited.iterrows()
+                        if pd.notna(r["Malzeme Cinsi"]) and str(r["Malzeme Cinsi"]).strip()
+                        and pd.notna(r["Yoğunluk (g/cm³)"])]
+                names = [r["name"] for r in rows]
+                if len(set(names)) != len(names):
+                    st.error("Aynı malzeme cinsi birden fazla kez girilmiş.")
+                elif any(r["density"] <= 0 for r in rows):
+                    st.error("Yoğunluk sıfırdan büyük olmalı.")
+                else:
+                    db.set_material_types(rows)
+                    n = db.recalc_hammadde()
+                    flash(f"Malzeme cinsleri kaydedildi. {n} hammaddenin ağırlık/maliyeti güncellendi.")
+                    st.rerun()
+    with rm.container(key="card_set_formula"):
+        card_title("Hesaplama Mantığı")
+        st.markdown(
+            "**Hacim**  \n"
+            "- Dikdörtgen / kare: en × boy × uzunluk  \n"
+            "- Yuvarlak: π ÷ 4 × çap² × uzunluk  \n"
+            "(ölçüler mm, sonuç mm³ → ÷ 1.000 = cm³)\n\n"
+            "**Birim ağırlık (kg)** = hacim (cm³) × yoğunluk (g/cm³) ÷ 1.000\n\n"
+            "**Birim maliyet** = birim ağırlık × kg fiyatı  \n"
+            "(ölçü girilmemişse maliyet doğrudan kg fiyatıdır; ölçülü hammadde parça/adet olarak takip edilir)")
+        st.caption("Örnek: 30x40 mm, 50 mm boy, yoğunluk 7,85 → 60 cm³ × 7,85 ÷ 1.000 = 0,47 kg")
 
     with st.container(key="card_set_danger"):
         card_title("Tehlikeli Bölge")

@@ -98,7 +98,7 @@ def production_hours(month: str) -> float:
 
 
 def stock_value() -> float:
-    return float(db.scalar("SELECT COALESCE(SUM(quantity*unit_cost),0) FROM stock_items"))
+    return float(db.scalar("SELECT COALESCE(SUM(quantity*unit_cost),0) FROM stock_items WHERE in_stock=1"))
 
 
 def stock_turnover(year: str) -> float:

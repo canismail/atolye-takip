@@ -32,6 +32,8 @@ if "page" not in st.session_state:
     qp = st.query_params.get("page", "dashboard")
     st.session_state.page = qp if qp in PAGES else "dashboard"
 st.session_state.setdefault("global_search", "")
+if st.session_state.pop("_clear_search", False):
+    st.session_state.global_search = ""
 
 VIEWS = {
     "dashboard": dashboard.render,
@@ -61,7 +63,7 @@ with st.sidebar:
 def alerts() -> list[str]:
     items: list[str] = []
     if S.get("stock_alert") == "1":
-        for s in db.stock_items():
+        for s in db.stock_items(in_stock=True, with_products=True):
             if s["status"] == "Kritik":
                 items.append(f"🔴 Kritik stok: **{s['name']}** ({s['quantity']:g} {s['unit']}, min. {s['min_qty']:g})")
             elif s["status"] == "Minimuma Yakın":

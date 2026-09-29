@@ -107,15 +107,6 @@ section[data-testid="stSidebar"] *{color:#c7d1dd;}
 @media(max-width:1200px){.erp-kpis{grid-template-columns:repeat(2,1fr);}}
 @media(max-width:650px){.erp-kpis,.erp-kpis.c3{grid-template-columns:1fr;}}
 
-/* ---------- tablo PDF indirme: küçük, sağa yaslı, grid'in hemen altında ---------- */
-[class*="st-key-pdfbar"] div[data-testid="stDownloadButton"] button{
-  min-height:26px!important;height:26px!important;width:26px!important;padding:0!important;
-  border-radius:6px!important;border:1px solid var(--line)!important;background:#fff!important;
-  color:var(--muted)!important;box-shadow:0 1px 3px rgba(16,24,40,.08)!important;font-size:13px!important;
-  opacity:.55;transition:opacity .12s ease,color .12s ease,border-color .12s ease;}
-[class*="st-key-pdfbar"] div[data-testid="stDownloadButton"] button:hover{
-  opacity:1;background:#f4f7fb!important;color:var(--blue)!important;border-color:var(--blue)!important;}
-[class*="st-key-pdfbar"] div[data-testid="stDownloadButton"] button p{margin:0!important;}
 </style>
 """
 
@@ -314,12 +305,8 @@ def data_table(
         except Exception:
             company = ""
         pdf_bytes = table_pdf_bytes(title, list(columns), pdf_rows, company=company)
-        with st.container(key=f"pdfbar_{key}_{nonce(key)}"):
-            bar = st.columns([12, 1])
-            with bar[1]:
-                st.download_button("⬇", data=pdf_bytes, file_name=f"{slug(title)}.pdf",
-                                   mime="application/pdf", key=f"{key}_pdf_{nonce(key)}",
-                                   help="PDF olarak indir")
+        st.download_button("⬇ PDF olarak indir", data=pdf_bytes, file_name=f"{slug(title)}.pdf",
+                           mime="application/pdf", key=f"{key}_pdf_{nonce(key)}")
     return selected
 
 

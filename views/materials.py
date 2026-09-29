@@ -11,6 +11,7 @@ import streamlit as st
 from core import db
 from core.ui import bump, card_title, confirm_delete, data_table, flash, kpis, search_filter
 from core.utils import money, num
+from views.stock import add_stock_dialog
 
 
 @st.dialog("Malzeme Bileşeni")
@@ -28,10 +29,60 @@ def material_item_dialog(item: dict | None = None) -> None:
     cat = c1.selectbox("Kategori", cats, index=cats.index(item["category"]) if item.get("category") in cats else 0)
     units = db.UNITS
     unit = c2.selectbox("Birim", units, index=units.index(item["unit"]) if item.get("unit") in units else 0)
-    c3, c4 = st.columns(2)
-    min_qty = c3.number_input("Minimum Stok", min_value=0.0, value=float(item.get("min_qty", 0)), step=1.0)
-    cost = c4.number_input("Birim Maliyet", min_value=0.0, value=float(item.get("unit_cost", 0)), step=1.0)
-    loc = st.text_input("Konum", value=item.get("location") or "", placeholder="A-01")
+    min_qty = st.number_input("Minimum Stok", min_value=0.0, value=float(item.get("min_qty", 0)), step=1.0)
+
+    # Hammadde ise ölçü / cins seçilir, parça ağırlığı ve maliyeti otomatik hesaplanır
+    shape = a = b = length = density = None
+    grade = ""
+    weight = 0.0
+    if cat == "Hammadde":
+        st.markdown("**Ölçü ve ağırlık**")
+        shapes = {"rect": "Dikdörtgen / Kare (en × boy)", "round": "Yuvarlak (çap)"}
+        keys = list(shapes)
+        shape = st.radio("Kesit", keys, format_func=shapes.get, horizontal=True,
+                         index=keys.index(item["shape"]) if item.get("shape") in keys else 0)
+        if shape == "rect":
+            d1, d2, d3 = st.columns(3)
+            a = d1.number_input("En (mm)", min_value=0.0, value=float(item.get("dim_a") or 0), step=1.0)
+            b = d2.number_input("Boy (mm)", min_value=0.0, value=float(item.get("dim_b") or 0), step=1.0)
+            length = d3.number_input("Uzunluk (mm)", min_value=0.0, value=float(item.get("length_mm") or 0), step=1.0)
+        else:
+            d1, d3 = st.columns(2)
+            a = d1.number_input("Çap (mm)", min_value=0.0, value=float(item.get("dim_a") or 0), step=1.0)
+            b = 0.0
+            length = d3.number_input("Uzunluk (mm)", min_value=0.0, value=float(item.get("length_mm") or 0), step=1.0)
+
+        types = {t["name"]: t["density"] for t in db.get_material_types()}
+        if item.get("grade") and item["grade"] not in types:  # ayarlardan silinmiş eski cins
+            types[item["grade"]] = float(item.get("density") or db.DEFAULT_DENSITY)
+        if types:
+            names = list(types)
+            grade = st.selectbox("Malzeme Cinsi", names,
+                                 index=names.index(item["grade"]) if item.get("grade") in names else 0,
+                                 format_func=lambda n: f"{n}  ({num(types[n])} g/cm³)")
+            density = types[grade]
+        else:
+            st.warning("Malzeme cinsi tanımlı değil. **Ayarlar → Malzeme Cinsleri** bölümünden ekleyin.")
+            density = 0.0
+        weight = db.calc_unit_weight(shape, a, b, length, density)
+        if weight > 0:
+            vol = (a * b if shape == "rect" else 3.141592653589793 / 4 * a * a) * length / 1000
+            st.success(f"Birim ağırlık: **{num(weight)} kg** / parça  ·  hacim {num(vol)} cm³ × {num(density)} g/cm³")
+        else:
+            st.caption("Ölçüleri ve cinsi seçince parça başına kilo otomatik hesaplanır.")
+        kg_price = st.number_input("Kg Fiyatı", min_value=0.0, step=1.0,
+                                   value=float(item["kg_price"] if item.get("kg_price") is not None
+                                               else item.get("unit_cost", 0)))
+        cost = db.hammadde_unit_cost(unit, weight, kg_price)
+        if weight > 0:
+            st.success(f"Birim maliyet: **{money(cost)}**  ({num(weight)} kg × {money(kg_price)}/kg)")
+            if unit != "adet":
+                st.caption("Ölçülü hammadde parça sayısıyla takip edilir; kaydedince birim **adet** yapılır.")
+        else:
+            st.caption("Ölçü girilmediği için birim maliyet ağırlıktan hesaplanamadı; kg fiyatı birim maliyet olarak kullanılır.")
+    else:
+        kg_price = None
+        cost = st.number_input("Birim Maliyet", min_value=0.0, value=float(item.get("unit_cost", 0)), step=1.0)
     if not item:
         st.caption("💡 Stok miktarını girmek için kaydettikten sonra **Stok** sayfasından "
                    "'± Stok Hareketi' ile giriş yapabilirsin.")
@@ -43,14 +94,22 @@ def material_item_dialog(item: dict | None = None) -> None:
         if not name.strip():
             st.error("Bileşen adı zorunludur.")
             return
+        # Hammadde dışında ölçü alanları temizlenir
+        if cat == "Hammadde" and weight > 0:
+            unit = "adet"
+        extra = (shape, a, b, length, grade or None, density, weight, kg_price) if cat == "Hammadde" \
+            else (None, None, None, None, None, None, 0.0, None)
         if item:
-            db.execute("UPDATE stock_items SET name=?, category=?, unit=?, min_qty=?, unit_cost=?, location=? "
-                       "WHERE id=?", (name.strip(), cat, unit, min_qty, cost, loc.strip(), item["id"]))
+            db.execute("UPDATE stock_items SET name=?, category=?, unit=?, min_qty=?, unit_cost=?, "
+                       "shape=?, dim_a=?, dim_b=?, length_mm=?, grade=?, density=?, unit_weight=?, kg_price=? "
+                       "WHERE id=?", (name.strip(), cat, unit, min_qty, cost, *extra, item["id"]))
             flash(f"{name} güncellendi.")
         else:
             code = db.code_from_name("stock_items", name)
             sid = db.execute("INSERT INTO stock_items(code, name, category, unit, quantity, min_qty, unit_cost, "
-                             "location) VALUES (?,?,?,?,0,?,?,?)", (code, name.strip(), cat, unit, min_qty, cost, loc.strip()))
+                             "shape, dim_a, dim_b, length_mm, grade, density, unit_weight, kg_price) "
+                             "VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?)",
+                             (code, name.strip(), cat, unit, min_qty, cost, *extra))
             st.session_state.selected_material = sid
             flash(f"{name} eklendi.")
         bump("materials")
@@ -61,10 +120,10 @@ def render(q: str = "") -> None:
     items = db.stock_items()
     kpis([
         {"icon": "▦", "color": "blue", "label": "Malzeme Bileşeni", "value": num(len(items))},
-        {"icon": "!", "color": "red", "label": "Kritik Stok",
-         "value": num(sum(1 for i in items if i["status"] == "Kritik"))},
-        {"icon": "!", "color": "yellow", "label": "Minimuma Yakın",
-         "value": num(sum(1 for i in items if i["status"] == "Minimuma Yakın"))},
+        {"icon": "□", "color": "green", "label": "Stokta Takip Edilen",
+         "value": num(sum(1 for i in items if i["in_stock"]))},
+        {"icon": "-", "color": "yellow", "label": "Stoğa Eklenmemiş",
+         "value": num(sum(1 for i in items if not i["in_stock"]))},
     ], cols=3)
 
     with st.container(key="card_materials_list"):
@@ -82,13 +141,19 @@ def render(q: str = "") -> None:
         if not df.empty:
             if cat != "Tüm Kategoriler":
                 df = df[df["category"] == cat]
+            df["grade"] = df["grade"].fillna("")
+            df["in_stock"] = df["in_stock"].apply(lambda v: "Stokta" if v else "-")
+            df["unit_weight"] = df["unit_weight"].apply(lambda w: f"{num(w)} kg" if (w or 0) > 0 else "")
+            df["kg_price"] = df["kg_price"].apply(lambda v: f"{money(v)}/kg" if pd.notna(v) and v else "")
             df = df.rename(columns={"code": "Kod", "name": "Bileşen", "category": "Kategori",
                                     "unit": "Birim", "min_qty": "Min. Stok", "unit_cost": "Birim Maliyet",
-                                    "location": "Konum"})
+                                    "size": "Ölçü", "grade": "Cins",
+                                    "unit_weight": "Birim Ağırlık", "kg_price": "Kg Fiyatı", "in_stock": "Stok"})
             df = search_filter(df, local, q)
         sel = data_table(
             df, "materials",
-            ["Kod", "Bileşen", "Kategori", "Birim", "Min. Stok", "Birim Maliyet", "Konum"],
+            ["Kod", "Bileşen", "Kategori", "Ölçü", "Cins", "Birim Ağırlık", "Birim", "Min. Stok",
+             "Kg Fiyatı", "Birim Maliyet", "Stok"],
             money_cols=("Birim Maliyet",),
             column_config={"Min. Stok": st.column_config.NumberColumn(format="%.2f")},
             title="Malzeme Bileşenleri",
@@ -105,18 +170,39 @@ def render(q: str = "") -> None:
     if not item:
         return
     with st.container(key="card_material_detail"):
-        top, acts = st.columns([2, 1.6], vertical_alignment="center")
+        top, acts = st.columns([1.6, 2.2], vertical_alignment="center")
+        spec = ""
+        if item["category"] == "Hammadde" and item.get("size"):
+            spec = (f" · {item['size']}" + (f" · {item['grade']}" if item.get("grade") else "")
+                    + (f" · {num(item['unit_weight'])} kg/parça" if item["unit_weight"] > 0 else ""))
         top.markdown(f"**{item['code']} · {item['name']}**  \n"
-                     f"<span class='erp-small'>{item['category']} · {item['unit']} · Min. {num(item['min_qty'])} · "
-                     f"Konum: {item['location'] or '-'}</span>", unsafe_allow_html=True)
-        b = acts.columns(2)
+                     f"<span class='erp-small'>{item['category']}{spec} · {item['unit']} · "
+                     f"Min. {num(item['min_qty'])}</span>",
+                     unsafe_allow_html=True)
+        b = acts.columns(3)
         if b[0].button("✎ Düzenle", width="stretch", key="mat_edit"):
             material_item_dialog(item)
-        with b[1]:
+        if not item["in_stock"]:
+            if b[1].button("＋ Stoğa Ekle", type="primary", width="stretch", key="mat_to_stock"):
+                add_stock_dialog(item)
+        elif b[1].button("− Stoktan Kaldır", width="stretch", key="mat_from_stock"):
+            err = db.remove_from_stock(item["id"])
+            if err:
+                st.error(err)
+            else:
+                flash(f"{item['name']} stok listesinden kaldırıldı.")
+                bump("materials")
+                st.rerun()
+        with b[2]:
             confirm_delete(f"mat_{item['id']}", item["name"],
                            lambda: db.delete_stock_item(item["id"]) or bump("materials"))
-        st.caption(f"Mevcut stok: **{num(item['quantity'])} {item['unit']}** · "
-                   f"Stok değeri: **{money(item['value'])}** — miktar Stok sayfasından güncellenir.")
+        if item["in_stock"]:
+            tot = (f" (toplam **{num(item['quantity'] * item['unit_weight'])} kg**)"
+                   if item["unit_weight"] > 0 and item["unit"] == "adet" else "")
+            st.caption(f"Mevcut stok: **{num(item['quantity'])} {item['unit']}**{tot} · "
+                       f"Stok değeri: **{money(item['value'])}** — miktar Stok sayfasından güncellenir.")
+        else:
+            st.caption("Bu bileşen henüz stok listesinde değil. **＋ Stoğa Ekle** ile Stok sayfasına ekleyebilirsin.")
         used = db.query("""SELECT p.name, m.quantity FROM product_materials m
                            JOIN products p ON p.id=m.product_id WHERE m.stock_id=?""", (item["id"],))
         if used:

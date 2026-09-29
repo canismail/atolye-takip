@@ -28,7 +28,7 @@ def render(q: str = "") -> None:
     new_products = db.scalar("SELECT COUNT(*) FROM products WHERE substr(created_at,1,7)=?", (cur,))
     sales_cur, sales_prev = metrics.sales_total(cur), metrics.sales_total(prev)
     net_cur, net_prev = metrics.net(cur), metrics.net(prev)
-    stocks = db.stock_items()
+    stocks = db.stock_items(in_stock=True, with_products=True)
     critical = [s for s in stocks if s["status"] == "Kritik"]
     near = [s for s in stocks if s["status"] == "Minimuma Yakın"]
 

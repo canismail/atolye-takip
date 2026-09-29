@@ -123,8 +123,8 @@ def render(q: str = "") -> None:
                WHERE substr(date,1,4)=? ORDER BY date""", (y2,)))
         stock_df = pd.DataFrame([{"Kod": s["code"], "Ad": s["name"], "Kategori": s["category"], "Birim": s["unit"],
                                   "Mevcut": s["quantity"], "Min.": s["min_qty"], "Durum": s["status"],
-                                  "Birim Maliyet": s["unit_cost"], "Stok Değeri": s["value"], "Konum": s["location"]}
-                                 for s in db.stock_items()])
+                                  "Birim Maliyet": s["unit_cost"], "Stok Değeri": s["value"]}
+                                 for s in db.stock_items(in_stock=True, with_products=True)])
         h[1].download_button("Tüm Raporu Excel'e Aktar",
                              data=_excel({"Aylık Özet": full, "En Çok Satan": _top_df(y2), "Satışlar": sales_df,
                                           "Gelir-Gider": tx_df, "Stok": stock_df}),

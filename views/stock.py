@@ -38,8 +38,60 @@ def movement_dialog(item: dict) -> None:
         st.rerun()
 
 
+@st.dialog("Stoğa Ekle")
+def add_stock_dialog(item: dict | None = None, product: dict | None = None) -> None:
+    """Malzeme bileşenini veya ürünü Stok sayfasına ekler (istenirse başlangıç miktarı girilir)."""
+    target = None  # ("item", satır) | ("product", ürün)
+    if item is not None:
+        st.markdown(f"**{item['code']} · {item['name']}**")
+        target = ("item", item)
+    elif product is not None:
+        st.markdown(f"**{product['code']} · {product['name']}** (ürün)")
+        target = ("product", product)
+    else:
+        kind = st.radio("Ne eklenecek?", ["Malzeme Bileşeni", "Ürün"], horizontal=True)
+        if kind == "Ürün":
+            in_stock_pids = {i["product_id"] for i in db.stock_items(in_stock=True, with_products=True)
+                             if i.get("product_id")}
+            avail = [p for p in db.products_with_stats() if p["id"] not in in_stock_pids]
+            empty_msg = "Stoğa eklenecek ürün yok. Önce **Ürünler** sayfasından ürün ekleyin."
+            fmt = lambda p: f"{p['code']} · {p['name']}"  # noqa: E731
+            kind_key = "product"
+        else:
+            avail = [i for i in db.stock_items() if not i["in_stock"]]
+            empty_msg = ("Stoğa eklenecek bileşen yok. Önce **Malzeme Bileşenleri** sayfasından bileşen "
+                         "tanımlayın (tanımlı bileşenlerin hepsi zaten stokta).")
+            fmt = lambda i: f"{i['code']} · {i['name']}"  # noqa: E731
+            kind_key = "item"
+        if not avail:
+            st.info(empty_msg)
+            if st.button("Kapat", width="stretch"):
+                st.rerun()
+            return
+        target = (kind_key, st.selectbox("Seçim", avail, format_func=fmt))
+    kind_key, obj = target
+    unit = "adet" if kind_key == "product" else obj["unit"]
+    qty = st.number_input(f"Başlangıç miktarı ({unit})", min_value=0.0, value=0.0, step=1.0,
+                          help="Boş (0) bırakırsan sadece stok listesine eklenir; miktarı sonra girebilirsin.")
+    on = st.date_input("Tarih", format="DD.MM.YYYY")
+    note = st.text_input("Açıklama", placeholder="Örn. Tedarikçi teslimatı / üretimden giriş")
+    f1, f2 = st.columns(2)
+    if f1.button("Vazgeç", width="stretch"):
+        st.rerun()
+    if f2.button("Stoğa Ekle", type="primary", width="stretch"):
+        if kind_key == "product":
+            sid = db.add_product_to_stock(obj["id"], qty, note, on.isoformat())
+        else:
+            sid = obj["id"]
+            db.add_to_stock(sid, qty, note, on.isoformat())
+        st.session_state.selected_stock = sid
+        flash(f"{obj['name']} stoğa eklendi.")
+        bump("stock")
+        st.rerun()
+
+
 def render(q: str = "") -> None:
-    items = db.stock_items()
+    items = db.stock_items(in_stock=True, with_products=True)
     kpis([
         {"icon": "□", "color": "blue", "label": "Stok Kalemi", "value": num(len(items))},
         {"icon": "₺", "color": "green", "label": "Stok Değeri", "value": money(metrics.stock_value())},
@@ -54,13 +106,12 @@ def render(q: str = "") -> None:
         with h[0]:
             card_title("Stok Listesi")
         local = h[1].text_input("Stok ara", placeholder="Stok ara...", label_visibility="collapsed", key="stock_q")
-        cat = h[2].selectbox("Kategori", ["Tüm Kategoriler"] + db.STOCK_CATEGORIES,
+        cat = h[2].selectbox("Kategori", ["Tüm Kategoriler"] + db.STOCK_CATEGORIES + ["Ürün"],
                              label_visibility="collapsed", key="stock_cat")
         stf = h[3].selectbox("Durum", ["Tüm Durumlar", "Normal", "Minimuma Yakın", "Kritik"],
                              label_visibility="collapsed", key="stock_st")
-        if h[4].button("＋ Malzeme Ekle", type="primary", width="stretch"):
-            go("materials")
-            st.rerun()
+        if h[4].button("＋ Stoğa Ekle", type="primary", width="stretch"):
+            add_stock_dialog()
 
         df = pd.DataFrame(items)
         if not df.empty:
@@ -71,19 +122,19 @@ def render(q: str = "") -> None:
             df = df.rename(columns={"code": "Kod", "name": "Ürün / Malzeme", "category": "Kategori",
                                     "unit": "Birim", "quantity": "Mevcut", "min_qty": "Min.",
                                     "status": "Durum", "unit_cost": "Birim Maliyet",
-                                    "value": "Stok Değeri", "location": "Konum"})
+                                    "value": "Stok Değeri", "size": "Ölçü"})
             df = search_filter(df, local, q)
         sel = data_table(
             df, "stock",
-            ["Kod", "Ürün / Malzeme", "Kategori", "Birim", "Mevcut", "Min.", "Durum",
-             "Birim Maliyet", "Stok Değeri", "Konum"],
+            ["Kod", "Ürün / Malzeme", "Kategori", "Ölçü", "Birim", "Mevcut", "Min.", "Durum",
+             "Birim Maliyet", "Stok Değeri"],
             status_cols=("Durum",), money_cols=("Birim Maliyet", "Stok Değeri"),
             column_config={"Mevcut": st.column_config.NumberColumn(format="%.2f"),
                            "Min.": st.column_config.NumberColumn(format="%.2f")},
             title="Stok Listesi",
         )
         if not items:
-            st.caption("Önce **Malzeme Bileşenleri** sayfasından bileşen ekleyin, sonra burada stok girin.")
+            st.caption("Stok listesi boş. **＋ Stoğa Ekle** ile bir malzeme bileşeni veya ürün ekleyin.")
         elif sel is None:
             st.caption("Stok hareketi girmek için tablodan bir satır seçin.")
 
@@ -95,10 +146,20 @@ def render(q: str = "") -> None:
     if item:
         with st.container(key="card_stock_detail"):
             card_title(f"{item['code']} · {item['name']}")
+            if item.get("size") or item.get("grade"):
+                tot = (f" · toplam **{num(item['quantity'] * item['unit_weight'])} kg**"
+                       if item["unit_weight"] > 0 and item["unit"] == "adet" else "")
+                st.caption(f"{item['size']}" + (f" · {item['grade']}" if item.get("grade") else "")
+                           + (f" · {num(item['unit_weight'])} kg/parça" if item["unit_weight"] > 0 else "") + tot)
             b = st.columns([1.5, 1.8, 2.7])
             if b[0].button("± Stok Hareketi", type="primary", width="stretch"):
                 movement_dialog(item)
-            if b[1].button("✎ Malzeme Bilgisini Düzenle", width="stretch"):
+            if item.get("product_id"):
+                if b[1].button("✎ Ürünü Aç", width="stretch"):
+                    st.session_state.selected_product = item["product_id"]
+                    go("products")
+                    st.rerun()
+            elif b[1].button("✎ Malzeme Bilgisini Düzenle", width="stretch"):
                 st.session_state.selected_material = item["id"]
                 go("materials")
                 st.rerun()

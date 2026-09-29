@@ -2,6 +2,7 @@
 ve kayıtlar arası otomatik bağlantılar (ör. tahsil edilen satış -> gelir kaydı)."""
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 from datetime import date, datetime
@@ -28,7 +29,17 @@ CREATE TABLE IF NOT EXISTS stock_items (
     min_qty    REAL NOT NULL DEFAULT 0,
     unit_cost  REAL NOT NULL DEFAULT 0,
     location   TEXT,
-    created_at TEXT NOT NULL DEFAULT (date('now','localtime'))
+    created_at TEXT NOT NULL DEFAULT (date('now','localtime')),
+    shape       TEXT,                    -- Hammadde ölçüsü: 'rect' | 'round'
+    dim_a       REAL,                    -- en (rect) veya çap (round), mm
+    dim_b       REAL,                    -- boy (rect), mm
+    length_mm   REAL,                    -- uzunluk, mm
+    grade       TEXT,                    -- malzeme cinsi (ör. 1040)
+    density     REAL,                    -- g/cm³
+    unit_weight REAL NOT NULL DEFAULT 0, -- parça başına kg (hesaplanan)
+    kg_price    REAL,                    -- hammadde kg fiyatı
+    in_stock    INTEGER NOT NULL DEFAULT 0, -- 1: Stok sayfasında takip ediliyor
+    product_id  INTEGER                     -- dolu ise bu satır bir ürünün (mamul) stoğudur
 );
 
 CREATE TABLE IF NOT EXISTS stock_movements (
@@ -139,9 +150,24 @@ DEFAULT_SETTINGS = {
     "sales_target": "300000",
     "capacity_hours": "300",
     "turnover_target": "6",
+    "material_types": json.dumps([
+        {"name": "1040 (Çelik)", "density": 7.85},
+        {"name": "St37 (Çelik)", "density": 7.85},
+        {"name": "Paslanmaz 304", "density": 7.93},
+        {"name": "Alüminyum", "density": 2.70},
+        {"name": "Pirinç", "density": 8.50},
+        {"name": "Bakır", "density": 8.96},
+        {"name": "Döküm", "density": 7.20},
+    ], ensure_ascii=False),
 }
 
-STOCK_CATEGORIES = ["Hammadde", "Sarf", "Kimyasal", "Yedek Parça", "Yarı Mamul", "Diğer"]
+STOCK_CATEGORIES = ["Yedek Parça", "Hammadde", "Diğer"]
+DEFAULT_DENSITY = 7.85  # çelik / demir, g/cm³
+STOCK_MIGRATIONS = [
+    ("shape", "TEXT"), ("dim_a", "REAL"), ("dim_b", "REAL"), ("length_mm", "REAL"),
+    ("grade", "TEXT"), ("density", "REAL"), ("unit_weight", "REAL NOT NULL DEFAULT 0"),
+    ("kg_price", "REAL"), ("in_stock", "INTEGER NOT NULL DEFAULT 0"), ("product_id", "INTEGER"),
+]
 UNITS = ["adet", "kg", "gr", "lt", "metre", "paket", "takım"]
 PRODUCT_CATEGORIES = ["Metal Ürün", "Yedek Parça", "Makine", "Diğer"]
 INCOME_CATEGORIES = ["Satış", "Hizmet", "Faiz", "Diğer Gelir"]
@@ -162,6 +188,16 @@ def get_conn() -> sqlite3.Connection:
 def init_db() -> None:
     with get_conn() as c:
         c.executescript(SCHEMA)
+        have = {r[1] for r in c.execute("PRAGMA table_info(stock_items)")}
+        for col, ddl in STOCK_MIGRATIONS:
+            if col not in have:
+                c.execute(f"ALTER TABLE stock_items ADD COLUMN {col} {ddl}")
+                if col == "in_stock":  # eski kayıtlar zaten stokta görünüyordu
+                    c.execute("UPDATE stock_items SET in_stock=1")
+        # eski kategoriler (Sarf, Kimyasal, Yarı Mamul...) yeni listeye taşınır
+        marks = ",".join("?" * len(STOCK_CATEGORIES))
+        c.execute(f"UPDATE stock_items SET category='Diğer' WHERE product_id IS NULL AND category NOT IN ({marks})",
+                  STOCK_CATEGORIES)
         for k, v in DEFAULT_SETTINGS.items():
             c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
 
@@ -255,12 +291,87 @@ def stock_status(qty: float, min_qty: float, near_pct: float) -> str:
     return "Normal"
 
 
-def stock_items() -> list[dict]:
+def calc_unit_weight(shape: str | None, a: float, b: float, length: float, density: float) -> float:
+    """Parça başına kg. Ölçüler mm, yoğunluk g/cm³.
+    rect: en × boy × uzunluk, round: π/4 × çap² × uzunluk."""
+    import math
+
+    if not shape or not length or not density or not a:
+        return 0.0
+    if shape == "round":
+        vol_mm3 = math.pi / 4 * a * a * length
+    else:
+        vol_mm3 = a * (b or 0) * length
+    return vol_mm3 / 1000 * density / 1000  # mm³ → cm³ → g → kg
+
+
+def get_material_types() -> list[dict]:
+    """Ayarlardaki malzeme cinsi / yoğunluk (g/cm³) listesi."""
+    try:
+        rows = json.loads(get_setting("material_types") or "[]")
+    except ValueError:
+        rows = []
+    return [{"name": str(r["name"]), "density": float(r["density"])}
+            for r in rows if r.get("name") and float(r.get("density") or 0) > 0]
+
+
+def set_material_types(rows: list[dict]) -> None:
+    set_settings({"material_types": json.dumps(rows, ensure_ascii=False)})
+
+
+def material_density(grade: str | None, fallback: float = DEFAULT_DENSITY) -> float:
+    for r in get_material_types():
+        if r["name"] == grade:
+            return r["density"]
+    return fallback
+
+
+def hammadde_unit_cost(unit: str, weight: float, kg_price: float) -> float:
+    """Birim maliyet: ölçülü hammaddede parça ağırlığı × kg fiyatı, ölçü yoksa kg fiyatı."""
+    return weight * kg_price if weight > 0 else kg_price
+
+
+def recalc_hammadde() -> int:
+    """Ayarlardaki yoğunluklar değişince tüm hammaddelerin ağırlık ve maliyetini yeniden hesaplar."""
+    n = 0
+    with get_conn() as c:
+        for r in c.execute("SELECT * FROM stock_items WHERE category='Hammadde' AND shape IS NOT NULL").fetchall():
+            dens = material_density(r["grade"], r["density"] or DEFAULT_DENSITY)
+            w = calc_unit_weight(r["shape"], r["dim_a"] or 0, r["dim_b"] or 0, r["length_mm"] or 0, dens)
+            cost = r["unit_cost"] if r["kg_price"] is None else hammadde_unit_cost(r["unit"], w, r["kg_price"])
+            unit = "adet" if w > 0 and r["kg_price"] is not None else r["unit"]  # ölçülü hammadde parça olarak takip edilir
+            c.execute("UPDATE stock_items SET density=?, unit_weight=?, unit_cost=?, unit=? WHERE id=?",
+                      (dens, w, cost, unit, r["id"]))
+            n += 1
+    return n
+
+
+def size_label(r: dict) -> str:
+    """Hammadde ölçüsünü okunur yazıya çevirir: '30x40 x 50 mm' / 'Ø30 x 50 mm'."""
+    if not r.get("shape") or not r.get("length_mm"):
+        return ""
+    a, b, ln = r.get("dim_a") or 0, r.get("dim_b") or 0, r["length_mm"]
+    from core.utils import num
+
+    if r["shape"] == "round":
+        return f"Ø{num(a)} x {num(ln)} mm"
+    return f"{num(a)}x{num(b)} x {num(ln)} mm"
+
+
+def stock_items(in_stock: bool = False, with_products: bool = False) -> list[dict]:
+    """Malzeme bileşenleri. in_stock=True: sadece Stok sayfasına eklenmiş olanlar.
+    with_products=True: ürünlerin (mamul) stok satırları da dahil."""
     near = float(get_setting("near_min_pct") or 20)
-    rows = query("SELECT * FROM stock_items ORDER BY code")
+    where = []
+    if in_stock:
+        where.append("in_stock=1")
+    if not with_products:
+        where.append("product_id IS NULL")
+    rows = query("SELECT * FROM stock_items" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY code")
     for r in rows:
         r["status"] = stock_status(r["quantity"], r["min_qty"], near)
         r["value"] = r["quantity"] * r["unit_cost"]
+        r["size"] = size_label(r)
     return rows
 
 
@@ -271,6 +382,40 @@ def add_stock_movement(stock_id: int, change: float, note: str = "", on: str | N
             "INSERT INTO stock_movements(stock_id, date, change, note) VALUES (?,?,?,?)",
             (stock_id, on or today(), change, note),
         )
+
+
+def add_to_stock(stock_id: int, qty: float = 0, note: str = "", on: str | None = None) -> None:
+    """Bileşeni Stok sayfasına ekler; başlangıç miktarı varsa giriş hareketi yazar."""
+    execute("UPDATE stock_items SET in_stock=1 WHERE id=?", (stock_id,))
+    if qty:
+        add_stock_movement(stock_id, qty, note or "İlk stok girişi", on)
+
+
+def add_product_to_stock(product_id: int, qty: float = 0, note: str = "", on: str | None = None) -> int:
+    """Ürünü (mamul) Stok sayfasına ekler; stok satırı yoksa oluşturur. Birim maliyet = malzeme maliyeti."""
+    p = next((x for x in products_with_stats() if x["id"] == product_id), None)
+    if p is None:
+        raise ValueError("Ürün bulunamadı.")
+    row = one("SELECT id FROM stock_items WHERE product_id=?", (product_id,))
+    if row:
+        sid = row["id"]
+        execute("UPDATE stock_items SET in_stock=1, name=?, unit_cost=? WHERE id=?",
+                (p["name"], p["material_cost"] or 0, sid))
+    else:
+        sid = execute("INSERT INTO stock_items(code, name, category, unit, quantity, min_qty, unit_cost, "
+                      "in_stock, product_id) VALUES (?,?,?,?,0,0,?,1,?)",
+                      ("URN-" + p["code"], p["name"], "Ürün", "adet", p["material_cost"] or 0, product_id))
+    if qty:
+        add_stock_movement(sid, qty, note or "İlk stok girişi", on)
+    return sid
+
+
+def remove_from_stock(stock_id: int) -> str | None:
+    q = scalar("SELECT quantity FROM stock_items WHERE id=?", (stock_id,))
+    if q:
+        return "Stokta miktar var. Önce stok hareketiyle miktarı sıfırlayın."
+    execute("UPDATE stock_items SET in_stock=0 WHERE id=?", (stock_id,))
+    return None
 
 
 def delete_stock_item(stock_id: int) -> str | None:
@@ -342,7 +487,9 @@ def delete_product(product_id: int) -> str | None:
     if s or w:
         return (f"Bu ürüne bağlı {s} satış ve {w} sipariş var; silinemez. "
                 "Kullanımdan kaldırmak için durumunu 'Pasif' yapabilirsiniz.")
-    execute("DELETE FROM products WHERE id=?", (product_id,))
+    with get_conn() as c:
+        c.execute("DELETE FROM stock_items WHERE product_id=?", (product_id,))
+        c.execute("DELETE FROM products WHERE id=?", (product_id,))
     return None
 
 

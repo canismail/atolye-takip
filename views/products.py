@@ -8,6 +8,7 @@ from core.ui import (badge, bump, card_title, confirm_delete, data_table, empty,
                      info_rows, search_filter)
 from core.utils import dmy, money, num
 from views.orders import order_dialog
+from views.stock import add_stock_dialog
 
 ICONS = ["📦", "🪑", "🚪", "🗄️", "⚙️", "🔩", "🔧", "🛠️", "🧰", "🪜", "🛞", "🔗"]
 
@@ -182,6 +183,18 @@ def render(q: str = "") -> None:
             st.caption(product["description"])
         if st.button("✎ Düzenle", type="primary", width="stretch", key="prod_edit"):
             product_dialog(product)
+        srow = db.one("SELECT id, quantity, in_stock FROM stock_items WHERE product_id=?", (product["id"],))
+        if srow and srow["in_stock"]:
+            st.caption(f"Stokta: **{num(srow['quantity'])} adet**")
+            if st.button("− Stoktan Kaldır", width="stretch", key="prod_from_stock"):
+                err = db.remove_from_stock(srow["id"])
+                if err:
+                    st.error(err)
+                else:
+                    flash(f"{product['name']} stok listesinden kaldırıldı.")
+                    st.rerun()
+        elif st.button("＋ Stoğa Ekle", width="stretch", key="prod_to_stock"):
+            add_stock_dialog(product=product)
         confirm_delete(f"prod_{product['id']}", product["name"],
                        lambda: db.delete_product(product["id"]) or bump("products"))
 
