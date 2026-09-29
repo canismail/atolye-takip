@@ -36,6 +36,7 @@ Tarayıcıda http://localhost:8501 açılır. Kurulumdan sonra `baslat.command` 
 |---|---|
 | Dashboard | KPI'lar (geçen aya göre değişim), yıllık aylık satış grafiği, son işlemler, kritik stoklar, bekleyen siparişler, cari özet (alacak, vadesi geçen, tahsilat oranı). "Tümünü Gör" butonları ilgili sayfaya gider. |
 | Siparişler | Ekle, düzenle, sil. İlerleme güncelleme (durum otomatik: Bekliyor, Üretimde, Tamamlandı), tamamla, iptal et, yeniden aç. Termin gecikmesi, tahmini süre, reçeteye göre malzeme ihtiyacı ve stok yeterliliği. |
+| Üretim Planı | Ürünlerin operasyon süresine + buffer (%) eklenerek günlük/haftalık üretilebilecek adet. Varsayımlar (günlük saat, çalışan sayısı, çalışma günleri, buffer) sayfada düzenlenir. Üretim hesaplayıcı: N adet için gereken süre, iş günü ve bitiş tarihi (gün gün). Açık siparişler termin sırasıyla bugünden başlayarak planlanır, terminden geç biten "Gecikir" görünür. |
 | Ürünler | Ekle, düzenle, sil (satış veya sipariş varsa engellenir). Tablodan seçilen ürünün detayı: malzeme bileşenleri ve operasyonlarda ekle, düzenle, sil, sırala (▲▼). Siparişler sekmesinden doğrudan sipariş açılır. Malzeme maliyeti ve toplam süre otomatik hesaplanır. |
 | Malzeme Bileşenleri | Ürünlerin alt bileşenlerini (hammadde, sarf, yedek parça vb.) tanımla: kategori, birim, minimum stok, birim maliyet, konum. Ekle, düzenle, sil (reçetede kullanılıyorsa engellenir). Miktar burada girilmez — "□ Stok Hareketi" ile Stok sayfasına yönlendirir. |
 | Stok | Malzeme Bileşenleri'nde tanımlanan kalemlerin mevcut miktar/değer/durumunu gösterir. Stok giriş, çıkış ve sayım düzeltmesi, hareket geçmişi. Durum otomatik hesaplanır: Normal, Minimuma Yakın, Kritik. Yeni bileşen tanımlama ve detay düzenleme Malzeme Bileşenleri sayfasına yönlendirir. |
@@ -62,6 +63,7 @@ core/db.py          # SQLite şema, CRUD, satış→gelir senkronu, kod üretimi
 core/metrics.py     # KPI ve rapor hesapları
 core/ui.py          # tasarım CSS'i, KPI kartları, tablo, PDF export, silme onayı
 core/pdf_export.py  # tablo → PDF üretimi
+core/planning.py    # üretim planı hesapları (kapasite, iş takvimi)
 core/utils.py       # para/tarih biçimlendirme, Türkçe→ASCII
 core/assets/        # yazı tipleri (PDF), logo/favicon
 views/*.py          # her sayfa ayrı dosya (materials.py = Malzeme Bileşenleri)

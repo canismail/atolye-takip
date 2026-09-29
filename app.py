@@ -9,8 +9,8 @@ import streamlit as st
 from core import db
 from core.ui import FAVICON_PATH, LOGO_PATH, PAGES, esc, go, inject_css, show_flash
 from core.utils import dmy, initials, money, set_currency
-from views import (customers, dashboard, finance, materials, orders, products, reports,
-                   sales, settings, stock)
+from views import (customers, dashboard, finance, materials, orders, planning, products,
+                   reports, sales, settings, stock)
 
 st.set_page_config(page_title="Atölye Yönetim Paneli", page_icon=str(FAVICON_PATH), layout="wide",
                    initial_sidebar_state="expanded")
@@ -38,6 +38,7 @@ if st.session_state.pop("_clear_search", False):
 VIEWS = {
     "dashboard": dashboard.render,
     "orders": orders.render,
+    "planning": planning.render,
     "products": products.render,
     "materials": materials.render,
     "stock": stock.render,

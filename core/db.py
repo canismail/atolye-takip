@@ -150,6 +150,10 @@ DEFAULT_SETTINGS = {
     "sales_target": "300000",
     "capacity_hours": "300",
     "turnover_target": "6",
+    "plan_daily_hours": "8",
+    "plan_week_days": "5",
+    "plan_buffer_pct": "15",
+    "plan_workers": "1",
     "material_types": json.dumps([
         {"name": "1040 (Çelik)", "density": 7.85},
         {"name": "St37 (Çelik)", "density": 7.85},

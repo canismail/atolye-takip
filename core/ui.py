@@ -19,6 +19,7 @@ FAVICON_PATH = BRAND_DIR / "favicon.png"
 PAGES = {
     "dashboard": ("⌂", "Dashboard"),
     "orders": ("↗", "Siparişler"),
+    "planning": ("◷", "Üretim Planı"),
     "products": ("◇", "Ürünler"),
     "materials": ("▦", "Malzeme Bileşenleri"),
     "stock": ("□", "Stok"),
