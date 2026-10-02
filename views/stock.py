@@ -7,7 +7,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from core import db, metrics
+from core import db, images, metrics
 from core.ui import bump, card_title, data_table, flash, go, kpis, search_filter
 from core.utils import dmy, money, num
 
@@ -124,12 +124,14 @@ def render(q: str = "") -> None:
                                     "status": "Durum", "unit_cost": "Birim Maliyet",
                                     "value": "Stok Değeri", "size": "Ölçü"})
             df = search_filter(df, local, q)
+            df = df.assign(Foto=df["photo"].apply(images.thumb_uri))
         sel = data_table(
             df, "stock",
-            ["Kod", "Ürün / Malzeme", "Kategori", "Ölçü", "Birim", "Mevcut", "Min.", "Durum",
+            ["Foto", "Kod", "Ürün / Malzeme", "Kategori", "Ölçü", "Birim", "Mevcut", "Min.", "Durum",
              "Birim Maliyet", "Stok Değeri"],
             status_cols=("Durum",), money_cols=("Birim Maliyet", "Stok Değeri"),
-            column_config={"Mevcut": st.column_config.NumberColumn(format="%.2f"),
+            column_config={"Foto": st.column_config.ImageColumn("Foto", width="small"),
+                           "Mevcut": st.column_config.NumberColumn(format="%.2f"),
                            "Min.": st.column_config.NumberColumn(format="%.2f")},
             title="Stok Listesi",
         )
@@ -145,6 +147,9 @@ def render(q: str = "") -> None:
 
     if item:
         with st.container(key="card_stock_detail"):
+            spath = images.image_path(item.get("photo"))
+            if spath:
+                st.image(str(spath), width=150)
             card_title(f"{item['code']} · {item['name']}")
             if item.get("size") or item.get("grade"):
                 tot = (f" · toplam **{num(item['quantity'] * item['unit_weight'])} kg**"

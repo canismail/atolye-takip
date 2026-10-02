@@ -36,16 +36,13 @@ def customer_dialog(c: dict | None = None) -> None:
         if email and "@" not in email:
             st.error("E-posta adresi geçersiz görünüyor.")
             return
-        code = c["code"] if c else db.code_from_name("customers", name)
-        vals = (code, name.strip(), contact.strip(), phone.strip(), email.strip(), addr.strip(),
-                tax.strip(), status)
+        vals = {"name": name.strip(), "contact": contact.strip(), "phone": phone.strip(), "email": email.strip(),
+                "address": addr.strip(), "tax_no": tax.strip(), "status": status}
         if c:
-            db.execute("UPDATE customers SET code=?, name=?, contact=?, phone=?, email=?, address=?, tax_no=?, "
-                       "status=? WHERE id=?", vals + (c["id"],))
+            db.save_customer(vals, c["id"])
             flash(f"{name} güncellendi.")
         else:
-            db.execute("INSERT INTO customers(code, name, contact, phone, email, address, tax_no, status) "
-                       "VALUES (?,?,?,?,?,?,?,?)", vals)
+            db.save_customer(vals)
             flash(f"{name} eklendi.")
         bump("customers")
         st.rerun()
@@ -106,7 +103,7 @@ def render(q: str = "") -> None:
             customer_dialog(c)
         new_status = "Pasif" if c["status"] == "Aktif" else "Aktif"
         if b[1].button(f"→ {new_status}", width="stretch", key="cust_toggle"):
-            db.execute("UPDATE customers SET status=? WHERE id=?", (new_status, c["id"]))
+            db.set_customer_status(c["id"], new_status)
             flash(f"{c['name']} {new_status.lower()} yapıldı.")
             st.rerun()
         with b[2]:

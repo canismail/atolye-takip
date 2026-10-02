@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core import db
+from core import db, remote
 from core.ui import FAVICON_PATH, LOGO_PATH, PAGES, esc, go, inject_css, show_flash
 from core.utils import dmy, initials, money, set_currency
 from views import (customers, dashboard, finance, materials, orders, planning, products,
@@ -14,6 +14,41 @@ from views import (customers, dashboard, finance, materials, orders, planning, p
 
 st.set_page_config(page_title="Atölye Yönetim Paneli", page_icon=str(FAVICON_PATH), layout="wide",
                    initial_sidebar_state="expanded")
+
+# ---------------------------------------------------------------- sunucu girişi (merkezi veritabanı)
+def _login_screen() -> None:
+    _, mid, _ = st.columns([1, 1.2, 1])
+    with mid:
+        st.markdown("### Atölye Yönetim")
+        st.caption(f"Sunucu: {remote.server_url()}")
+        with st.form("login_form"):
+            user = st.text_input("Kullanıcı adı")
+            pw = st.text_input("Şifre", type="password")
+            if st.form_submit_button("Giriş yap", type="primary", width="stretch"):
+                try:
+                    remote.login(user, pw)
+                    st.rerun()
+                except remote.RemoteError as exc:
+                    st.error(str(exc))
+
+
+if remote.enabled():
+    if not remote.logged_in():
+        try:
+            remote.auto_login()
+        except remote.RemoteError as exc:
+            st.error(str(exc))
+    if not remote.logged_in():
+        _login_screen()
+        st.stop()
+    try:
+        db.begin_run()  # sunucudaki güncel veriyi alır
+    except remote.RemoteError as exc:
+        if not remote.logged_in():
+            st.rerun()
+        st.error(str(exc))
+        st.button("Tekrar dene")
+        st.stop()
 
 # ---------------------------------------------------------------- başlangıç
 if "db_ready" not in st.session_state:
@@ -104,6 +139,9 @@ with st.container(key="topbar"):
                     unsafe_allow_html=True)
         st.button("⚙ Ayarlar", key="prof_settings", on_click=go, args=("settings",), width="stretch")
         st.button("⌂ Dashboard", key="prof_home", on_click=go, args=("dashboard",), width="stretch")
+        if remote.enabled():
+            st.caption(f"Sunucu: {remote.server_url()}")
+            st.button("⎋ Çıkış", key="prof_logout", on_click=remote.logout, width="stretch")
 
 if st.session_state.pop("_backup_error", None):
     st.warning("Otomatik yedek alınamadı. Ayarlar sayfasından manuel yedek alabilirsiniz.")

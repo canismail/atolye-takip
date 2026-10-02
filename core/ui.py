@@ -8,7 +8,7 @@ from typing import Callable
 import pandas as pd
 import streamlit as st
 
-from core import db
+from core import db, images
 from core.pdf_export import slug, table_pdf_bytes
 from core.utils import money, tr_lower
 
@@ -300,15 +300,41 @@ def data_table(
 
     if title:
         money_set = set(money_cols) | set(colored_money) | set(debt_cols)
-        pdf_rows = [[money(row[c]) if c in money_set else row[c] for c in columns] for _, row in df.iterrows()]
+        pcols = [c for c in columns if c != "Foto"]  # fotoğraf sütunu PDF'e alınmaz
+        pdf_rows = [[money(row[c]) if c in money_set else row[c] for c in pcols] for _, row in df.iterrows()]
         try:
             company = db.get_setting("company_name")
         except Exception:
             company = ""
-        pdf_bytes = table_pdf_bytes(title, list(columns), pdf_rows, company=company)
+        pdf_bytes = table_pdf_bytes(title, pcols, pdf_rows, company=company)
         st.download_button("⬇ PDF olarak indir", data=pdf_bytes, file_name=f"{slug(title)}.pdf",
                            mime="application/pdf", key=f"{key}_pdf_{nonce(key)}")
     return selected
+
+
+def photo_input(current: str | None, key: str):
+    """Fotoğraf alanı: mevcut görseli gösterir, yeni yükleme ve kaldırma seçeneği sunar.
+    Dönüş: (yüklenen dosya | None, kaldır işaretli mi)."""
+    st.markdown("**Fotoğraf**")
+    path = images.image_path(current)
+    rm = False
+    if path:
+        st.image(str(path), width=160)
+        rm = st.checkbox("Mevcut fotoğrafı kaldır", key=f"{key}_rm")
+    up = st.file_uploader("Yeni fotoğrafla değiştir" if path else "Fotoğraf yükle (PNG, JPG, WEBP)",
+                          type=images.ALLOWED, key=f"{key}_up")
+    if up is not None:
+        st.image(up, width=160)
+    return up, rm
+
+
+def resolve_photo(current: str | None, up, rm: bool, prefix: str):
+    """Kaydederken: (yeni dosya adı, silinecek eski dosya adı). Geçersiz görselde ValueError."""
+    if up is not None:
+        return images.save_image(up.getvalue(), prefix), current
+    if rm:
+        return None, current
+    return current, None
 
 
 def confirm_delete(key: str, label: str, on_confirm: Callable[[], str | None]) -> None:

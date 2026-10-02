@@ -3,9 +3,9 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from core import db
+from core import db, images
 from core.ui import (badge, bump, card_title, confirm_delete, data_table, empty, esc, flash,
-                     info_rows, search_filter)
+                     info_rows, photo_input, resolve_photo, search_filter)
 from core.utils import dmy, money, num
 from views.orders import order_dialog
 from views.stock import add_stock_dialog
@@ -33,6 +33,7 @@ def product_dialog(p: dict | None = None) -> None:
     icon = c4.selectbox("Simge", ICONS, index=ICONS.index(p["icon"]) if p.get("icon") in ICONS else 0)
     status = c5.selectbox("Durum", ["Aktif", "Pasif"], index=1 if p.get("status") == "Pasif" else 0)
     desc = st.text_area("Açıklama", value=p.get("description") or "", height=80)
+    up, rm_img = photo_input(p.get("image"), f"prod_{p.get('id', 'new')}")
     f1, f2 = st.columns(2)
     if f1.button("Vazgeç", width="stretch"):
         st.rerun()
@@ -40,15 +41,19 @@ def product_dialog(p: dict | None = None) -> None:
         if not name.strip():
             st.error("Ürün adı zorunludur.")
             return
-        code = p["code"] if p else db.code_from_name("products", name)
-        vals = (code, name.strip(), cat or "Diğer", icon, price, status, desc.strip())
+        try:
+            img, old_img = resolve_photo(p.get("image"), up, rm_img, "urun")
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        vals = {"name": name.strip(), "category": cat or "Diğer", "icon": icon, "unit_price": price,
+                "status": status, "description": desc.strip(), "image": img}
         if p:
-            db.execute("UPDATE products SET code=?, name=?, category=?, icon=?, unit_price=?, status=?, "
-                       "description=? WHERE id=?", vals + (p["id"],))
+            db.save_product(vals, p["id"])
+            images.delete_image(old_img)
             flash(f"{name} güncellendi.")
         else:
-            pid = db.execute("INSERT INTO products(code, name, category, icon, unit_price, status, description) "
-                             "VALUES (?,?,?,?,?,?,?)", vals)
+            pid = db.save_product(vals)
             st.session_state.selected_product = pid
             flash(f"{name} eklendi.")
         bump("products")
@@ -72,16 +77,7 @@ def material_dialog(product: dict, row: dict | None = None) -> None:
     if f1.button("Vazgeç", width="stretch"):
         st.rerun()
     if f2.button("Kaydet", type="primary", width="stretch", disabled=qty <= 0):
-        if row:
-            db.execute("UPDATE product_materials SET quantity=? WHERE id=?", (qty, row["id"]))
-        else:
-            dup = db.one("SELECT id FROM product_materials WHERE product_id=? AND stock_id=?", (product["id"], sid))
-            if dup:
-                db.execute("UPDATE product_materials SET quantity=quantity+? WHERE id=?", (qty, dup["id"]))
-            else:
-                seq = db.scalar("SELECT COALESCE(MAX(seq),0)+1 FROM product_materials WHERE product_id=?", (product["id"],))
-                db.execute("INSERT INTO product_materials(product_id, stock_id, quantity, seq) VALUES (?,?,?,?)",
-                           (product["id"], sid, qty, seq))
+        db.save_product_material(product["id"], sid, qty, row["id"] if row else None)
         flash("Bileşen kaydedildi.")
         bump("bom")
         st.rerun()
@@ -98,12 +94,7 @@ def operation_dialog(product: dict, row: dict | None = None) -> None:
         if not name.strip():
             st.error("Operasyon adı zorunludur.")
             return
-        if row:
-            db.execute("UPDATE product_operations SET name=?, minutes=? WHERE id=?", (name.strip(), mins, row["id"]))
-        else:
-            seq = db.scalar("SELECT COALESCE(MAX(seq),0)+1 FROM product_operations WHERE product_id=?", (product["id"],))
-            db.execute("INSERT INTO product_operations(product_id, seq, name, minutes) VALUES (?,?,?,?)",
-                       (product["id"], seq, name.strip(), mins))
+        db.save_operation(product["id"], name, mins, row["id"] if row else None)
         flash("Operasyon kaydedildi.")
         bump("ops")
         st.rerun()
@@ -121,8 +112,7 @@ def _row_actions(prefix: str, table: str, product: dict, row: dict, label: str, 
         st.rerun()
     with b[3]:
         def _del():
-            db.execute(f"DELETE FROM {table} WHERE id=?", (row["id"],))
-            db.renumber(table, product["id"])
+            db.delete_row(table, product["id"], row["id"])
             bump(prefix)
         confirm_delete(f"{prefix}_{row['id']}", label, _del)
 
@@ -148,10 +138,12 @@ def render(q: str = "") -> None:
                                     "unit_price": "Satış Fiyatı", "material_cost": "Malzeme Maliyeti",
                                     "status": "Durum"})
             df = search_filter(df, local, q)
+            df = df.assign(Foto=df["image"].apply(images.thumb_uri))
         sel = data_table(df, "products",
-                         ["Kod", "Ürün", "Kategori", "Malzeme", "Operasyon", "Toplam Süre",
+                         ["Foto", "Kod", "Ürün", "Kategori", "Malzeme", "Operasyon", "Toplam Süre",
                           "Malzeme Maliyeti", "Satış Fiyatı", "Durum"],
                          status_cols=("Durum",), money_cols=("Satış Fiyatı", "Malzeme Maliyeti"),
+                         column_config={"Foto": st.column_config.ImageColumn("Foto", width="small")},
                          title="Ürün Listesi")
         if not products:
             st.caption("İlk ürünü eklemek için **＋ Yeni Ürün** butonunu kullanın.")
@@ -165,9 +157,12 @@ def render(q: str = "") -> None:
 
     left, right = st.columns([1, 3.2])
     with left.container(key="card_prod_summary"):
+        ppath = images.image_path(product.get("image"))
+        if ppath:
+            st.image(str(ppath))
         st.markdown(
-            f'<div class="erp-product-image">{esc(product["icon"])}</div>'
-            f'<div class="erp-pname">{esc(product["name"])}</div>'
+            (f'<div class="erp-product-image">{esc(product["icon"])}</div>' if not ppath else "")
+            + f'<div class="erp-pname">{esc(product["name"])}</div>'
             f'<div class="erp-small">{esc(product["code"])}</div><br>{badge("● " + product["status"], "green" if product["status"] == "Aktif" else "gray")}'
             + info_rows([
                 ("Kategori", esc(product["category"])),

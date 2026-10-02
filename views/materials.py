@@ -8,8 +8,9 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from core import db
-from core.ui import bump, card_title, confirm_delete, data_table, flash, kpis, search_filter
+from core import db, images
+from core.ui import (bump, card_title, confirm_delete, data_table, flash, kpis, photo_input,
+                     resolve_photo, search_filter)
 from core.utils import money, num
 from views.stock import add_stock_dialog
 
@@ -38,6 +39,7 @@ def material_item_dialog(item: dict | None = None) -> None:
     if cat == "Hammadde":
         st.markdown("**Ölçü ve ağırlık**")
         shapes = {"rect": "Dikdörtgen / Kare (en × boy)", "round": "Yuvarlak (çap)"}
+        shapes["pipe"] = "Boru (dış çap × et kalınlığı)"
         keys = list(shapes)
         shape = st.radio("Kesit", keys, format_func=shapes.get, horizontal=True,
                          index=keys.index(item["shape"]) if item.get("shape") in keys else 0)
@@ -46,6 +48,15 @@ def material_item_dialog(item: dict | None = None) -> None:
             a = d1.number_input("En (mm)", min_value=0.0, value=float(item.get("dim_a") or 0), step=1.0)
             b = d2.number_input("Boy (mm)", min_value=0.0, value=float(item.get("dim_b") or 0), step=1.0)
             length = d3.number_input("Uzunluk (mm)", min_value=0.0, value=float(item.get("length_mm") or 0), step=1.0)
+        elif shape == "pipe":
+            d1, d2, d3 = st.columns(3)
+            a = d1.number_input("Dış Çap (mm)", min_value=0.0, value=float(item.get("dim_a") or 0), step=1.0)
+            b = d2.number_input("Et Kalınlığı (mm)", min_value=0.0, value=float(item.get("dim_b") or 0), step=0.1)
+            length = d3.number_input("Uzunluk (mm)", min_value=0.0, value=float(item.get("length_mm") or 0), step=1.0)
+            if a > 0 and b > 0 and 2 * b > a:
+                st.error("Et kalınlığı dış çapın yarısından büyük olamaz.")
+            elif a > 0 and b > 0:
+                st.caption(f"İç çap: {num(a - 2 * b)} mm")
         else:
             d1, d3 = st.columns(2)
             a = d1.number_input("Çap (mm)", min_value=0.0, value=float(item.get("dim_a") or 0), step=1.0)
@@ -66,7 +77,7 @@ def material_item_dialog(item: dict | None = None) -> None:
             density = 0.0
         weight = db.calc_unit_weight(shape, a, b, length, density)
         if weight > 0:
-            vol = (a * b if shape == "rect" else 3.141592653589793 / 4 * a * a) * length / 1000
+            vol = db.calc_volume_cm3(shape, a, b, length)
             st.success(f"Birim ağırlık: **{num(weight)} kg** / parça  ·  hacim {num(vol)} cm³ × {num(density)} g/cm³")
         else:
             st.caption("Ölçüleri ve cinsi seçince parça başına kilo otomatik hesaplanır.")
@@ -83,6 +94,7 @@ def material_item_dialog(item: dict | None = None) -> None:
     else:
         kg_price = None
         cost = st.number_input("Birim Maliyet", min_value=0.0, value=float(item.get("unit_cost", 0)), step=1.0)
+    up, rm_img = photo_input(item.get("image"), f"mat_{item.get('id', 'new')}")
     if not item:
         st.caption("💡 Stok miktarını girmek için kaydettikten sonra **Stok** sayfasından "
                    "'± Stok Hareketi' ile giriş yapabilirsin.")
@@ -94,22 +106,29 @@ def material_item_dialog(item: dict | None = None) -> None:
         if not name.strip():
             st.error("Bileşen adı zorunludur.")
             return
+        if cat == "Hammadde" and shape == "pipe" and a > 0 and (b <= 0 or 2 * b > a):
+            st.error("Boru için et kalınlığı 0'dan büyük ve dış çapın yarısından küçük/eşit olmalıdır.")
+            return
         # Hammadde dışında ölçü alanları temizlenir
+        try:
+            img, old_img = resolve_photo(item.get("image"), up, rm_img, "malzeme")
+        except ValueError as exc:
+            st.error(str(exc))
+            return
         if cat == "Hammadde" and weight > 0:
             unit = "adet"
-        extra = (shape, a, b, length, grade or None, density, weight, kg_price) if cat == "Hammadde" \
-            else (None, None, None, None, None, None, 0.0, None)
+        ham = cat == "Hammadde"
+        vals = {"name": name.strip(), "category": cat, "unit": unit, "min_qty": min_qty, "unit_cost": cost,
+                "shape": shape if ham else None, "dim_a": a if ham else None, "dim_b": b if ham else None,
+                "length_mm": length if ham else None, "grade": (grade or None) if ham else None,
+                "density": density if ham else None, "unit_weight": weight if ham else 0.0,
+                "kg_price": kg_price if ham else None, "image": img}
         if item:
-            db.execute("UPDATE stock_items SET name=?, category=?, unit=?, min_qty=?, unit_cost=?, "
-                       "shape=?, dim_a=?, dim_b=?, length_mm=?, grade=?, density=?, unit_weight=?, kg_price=? "
-                       "WHERE id=?", (name.strip(), cat, unit, min_qty, cost, *extra, item["id"]))
+            db.save_material(vals, item["id"])
+            images.delete_image(old_img)
             flash(f"{name} güncellendi.")
         else:
-            code = db.code_from_name("stock_items", name)
-            sid = db.execute("INSERT INTO stock_items(code, name, category, unit, quantity, min_qty, unit_cost, "
-                             "shape, dim_a, dim_b, length_mm, grade, density, unit_weight, kg_price) "
-                             "VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?)",
-                             (code, name.strip(), cat, unit, min_qty, cost, *extra))
+            sid = db.save_material(vals)
             st.session_state.selected_material = sid
             flash(f"{name} eklendi.")
         bump("materials")
@@ -150,12 +169,14 @@ def render(q: str = "") -> None:
                                     "size": "Ölçü", "grade": "Cins",
                                     "unit_weight": "Birim Ağırlık", "kg_price": "Kg Fiyatı", "in_stock": "Stok"})
             df = search_filter(df, local, q)
+            df = df.assign(Foto=df["image"].apply(images.thumb_uri))
         sel = data_table(
             df, "materials",
-            ["Kod", "Bileşen", "Kategori", "Ölçü", "Cins", "Birim Ağırlık", "Birim", "Min. Stok",
+            ["Foto", "Kod", "Bileşen", "Kategori", "Ölçü", "Cins", "Birim Ağırlık", "Birim", "Min. Stok",
              "Kg Fiyatı", "Birim Maliyet", "Stok"],
             money_cols=("Birim Maliyet",),
-            column_config={"Min. Stok": st.column_config.NumberColumn(format="%.2f")},
+            column_config={"Min. Stok": st.column_config.NumberColumn(format="%.2f"),
+                           "Foto": st.column_config.ImageColumn("Foto", width="small")},
             title="Malzeme Bileşenleri",
         )
         if not items:
@@ -170,6 +191,9 @@ def render(q: str = "") -> None:
     if not item:
         return
     with st.container(key="card_material_detail"):
+        mpath = images.image_path(item.get("image"))
+        if mpath:
+            st.image(str(mpath), width=150)
         top, acts = st.columns([1.6, 2.2], vertical_alignment="center")
         spec = ""
         if item["category"] == "Hammadde" and item.get("size"):

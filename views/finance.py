@@ -28,13 +28,9 @@ def finance_dialog(t: dict | None = None) -> None:
     if f1.button("Vazgeç", width="stretch"):
         st.rerun()
     if f2.button("Kaydet", type="primary", width="stretch", disabled=amount <= 0):
-        vals = (on.isoformat(), kind, cat or "Diğer", desc.strip(), doc.strip(), amount)
-        if t:
-            db.execute("UPDATE transactions SET date=?, type=?, category=?, description=?, doc_no=?, amount=? "
-                       "WHERE id=?", vals + (t["id"],))
-        else:
-            db.execute("INSERT INTO transactions(date, type, category, description, doc_no, amount) "
-                       "VALUES (?,?,?,?,?,?)", vals)
+        vals = {"date": on.isoformat(), "type": kind, "category": cat or "Diğer", "description": desc.strip(),
+                "doc_no": doc.strip(), "amount": amount}
+        db.save_transaction(vals, t["id"] if t else None)
         flash(f"{kind} kaydedildi: {money(amount)}")
         bump("finance")
         st.rerun()
@@ -107,6 +103,6 @@ def render(q: str = "") -> None:
             finance_dialog(t)
         with b[1]:
             def _del():
-                db.execute("DELETE FROM transactions WHERE id=?", (t["id"],))
+                db.delete_transaction(t["id"])
                 bump("finance")
             confirm_delete(f"fin_{t['id']}", f"{t['category']} {money(t['amount'])}", _del)

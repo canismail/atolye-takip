@@ -46,6 +46,8 @@ Tarayıcıda http://localhost:8501 açılır. Kurulumdan sonra `baslat.command` 
 | Raporlar | Aylık satış (hedefe göre), üretim saati (kapasiteye göre), stok devir hızı. En çok satan ürünler, aylık özet, gelir/gider trendi. Tek tablo veya tüm rapor Excel'e aktarılabilir. |
 | Ayarlar | Firma ve kullanıcı bilgileri, para birimi, KDV, stok uyarısı, minimuma yakın eşiği, otomatik yedekleme, rapor hedefleri. Manuel yedek, yedek indirme, geri yükleme, tüm verileri silme. |
 
+**Fotoğraf:** Ürün ve malzeme bileşeni formlarında fotoğraf yüklenebilir (PNG/JPG/WEBP). Görseller küçültülüp `data/images/` klasörüne kaydedilir; tablolarda küçük önizleme, detay kartında büyük görsel görünür. Stok satırındaki ürünler kendi fotoğrafını kullanır. Fotoğraflar veritabanı yedeğine dahil değildir, yedek alırken `data/images/` klasörünü de kopyalayın.
+
 **Üst bar:** Arama kutusu açık sayfadaki tüm tablolarda arar. 🔔 kritik stok, vadesi geçen alacak ve termini geçen siparişleri listeler. Profil menüsünden Ayarlar'a gidilir.
 
 **Dışa aktarma:** Her sayfadaki tablonun altında **"⬇ PDF olarak indir"** düğmesi vardır; o an ekranda görünen (arama/filtre uygulanmış) veriyi PDF olarak indirir. Raporlar sayfasındaki tablolar ayrıca Excel'e de aktarılabilir.
@@ -70,3 +72,14 @@ views/*.py          # her sayfa ayrı dosya (materials.py = Malzeme Bileşenleri
 data/erp.db         # veritabanı (ilk çalıştırmada oluşur)
 data/backups/       # yedekler
 ```
+
+## Merkezi veritabanı (telefonla ortak)
+
+`server.txt` dosyasında bir sunucu adresi varsa (ya da `ERP_SERVER_URL` ortam değişkeni tanımlıysa) panel yerel `data/erp.db` yerine
+mobil uygulamanın kullandığı sunucudaki veriyle çalışır; açılışta kullanıcı adı ve şifre sorulur
+(`ERP_USER` / `ERP_PASS` tanımlıysa otomatik girer). Telefonda yapılan değişiklik en geç ~6 sn içinde, panelde yapılan değişiklik anında ortak olur.
+
+- Okumalar sunucudan alınan anlık görüntü üzerinden, yazmalar sunucunun servisleri üzerinden yapılır (`core/remote.py`, `core/db.py`).
+- Fotoğraflar sunucuda tutulur; `data/image_cache` yalnızca yerel önbellektir.
+- "Şimdi Yedekle" sunucudaki verinin bu bilgisayara `.db` kopyasını kaydeder; sunucu ayrıca her gün kendi yedeğini alır.
+- Yerel moda dönmek için `server.txt` dosyasını silin (veya adı değiştirin).

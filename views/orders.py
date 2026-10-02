@@ -144,18 +144,17 @@ def render(q: str = "") -> None:
                     order_dialog(wo)
                 with b[3]:
                     def _del():
-                        db.execute("DELETE FROM work_orders WHERE id=?", (wo["id"],))
+                        db.delete_order(wo["id"])
                         bump("orders")
                     confirm_delete(f"wo_{wo['id']}", wo["code"], _del)
                 if wo["status"] == "İptal":
                     if b[4].button("↺ Yeniden Aç", width="stretch"):
-                        db.execute("UPDATE work_orders SET status=? WHERE id=?",
-                                   (db.status_for_progress(wo["progress"], "Bekliyor"), wo["id"]))
+                        db.reopen_order(wo["id"], wo["progress"])
                         bump("orders")
                         st.rerun()
                 elif wo["status"] != "Tamamlandı":
                     if b[4].button("✕ İptal Et", width="stretch"):
-                        db.execute("UPDATE work_orders SET status='İptal' WHERE id=?", (wo["id"],))
+                        db.cancel_order(wo["id"])
                         flash(f"{wo['code']} iptal edildi.", "✕")
                         bump("orders")
                         st.rerun()

@@ -5,7 +5,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from core import db
+from core import db, remote
 from core.ui import card_title, flash, info_rows
 from core.utils import CURRENCY_SYMBOLS, num
 
@@ -81,13 +81,17 @@ def render(q: str = "") -> None:
 
     with r2.container(key="card_set_backup"):
         card_title("Yedekleme")
+        if remote.enabled():
+            st.caption("Veriler sunucuda; sunucu her gün kendi yedeğini alır. Buradaki yedekler, sunucudaki verinin "
+                       "bu bilgisayara kaydedilen kopyalarıdır.")
         b1, b2 = st.columns(2)
         if b1.button("💾 Şimdi Yedekle", width="stretch"):
             p = db.backup_now("manuel")
             flash(f"Yedek alındı: {p.name}")
             st.rerun()
-        if db.DB_PATH.exists():
-            b2.download_button("⬇ Veritabanını İndir", data=db.DB_PATH.read_bytes(), width="stretch",
+        _dbb = db.db_bytes()
+        if _dbb:
+            b2.download_button("⬇ Veritabanını İndir", data=_dbb, width="stretch",
                                file_name=f"erp_{datetime.now():%Y%m%d_%H%M}.db", mime="application/octet-stream")
         backups = db.list_backups()
         if backups:
