@@ -121,15 +121,15 @@ def render(q: str = "") -> None:
                 df = df[df["status"] == stf]
             df = df.rename(columns={"code": "Kod", "name": "Ürün / Malzeme", "category": "Kategori",
                                     "unit": "Birim", "quantity": "Mevcut", "min_qty": "Min.",
-                                    "status": "Durum", "unit_cost": "Birim Maliyet",
+                                    "status": "Durum", "unit_cost": "Birim Maliyet", "sale_price": "Satış Fiyatı",
                                     "value": "Stok Değeri", "size": "Ölçü"})
             df = search_filter(df, local, q)
             df = df.assign(Foto=df["photo"].apply(images.thumb_uri))
         sel = data_table(
             df, "stock",
             ["Foto", "Kod", "Ürün / Malzeme", "Kategori", "Ölçü", "Birim", "Mevcut", "Min.", "Durum",
-             "Birim Maliyet", "Stok Değeri"],
-            status_cols=("Durum",), money_cols=("Birim Maliyet", "Stok Değeri"),
+             "Birim Maliyet", "Satış Fiyatı", "Stok Değeri"],
+            status_cols=("Durum",), money_cols=("Birim Maliyet", "Satış Fiyatı", "Stok Değeri"),
             column_config={"Foto": st.column_config.ImageColumn("Foto", width="small"),
                            "Mevcut": st.column_config.NumberColumn(format="%.2f"),
                            "Min.": st.column_config.NumberColumn(format="%.2f")},

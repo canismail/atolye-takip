@@ -98,7 +98,9 @@ def production_hours(month: str) -> float:
 
 
 def stock_value() -> float:
-    return float(db.scalar("SELECT COALESCE(SUM(quantity*unit_cost),0) FROM stock_items WHERE in_stock=1"))
+    return float(db.scalar("SELECT COALESCE(SUM(s.quantity * CASE WHEN s.product_id IS NOT NULL "
+        "THEN COALESCE(p.unit_price,0) ELSE s.unit_cost END),0) "
+        "FROM stock_items s LEFT JOIN products p ON p.id=s.product_id WHERE s.in_stock=1"))
 
 
 def stock_turnover(year: str) -> float:

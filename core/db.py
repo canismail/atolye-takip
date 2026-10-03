@@ -500,12 +500,13 @@ def stock_items(in_stock: bool = False, with_products: bool = False) -> list[dic
         where.append("s.in_stock=1")
     if not with_products:
         where.append("s.product_id IS NULL")
-    rows = query("SELECT s.*, COALESCE(s.image, p.image) AS photo FROM stock_items s "
-                 "LEFT JOIN products p ON p.id=s.product_id"
+    rows = query("SELECT s.*, COALESCE(s.image, p.image) AS photo, p.unit_price AS sale_price "
+                 "FROM stock_items s LEFT JOIN products p ON p.id=s.product_id"
                  + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY s.code")
     for r in rows:
         r["status"] = stock_status(r["quantity"], r["min_qty"], near)
-        r["value"] = r["quantity"] * r["unit_cost"]
+        # Ürün (mamul) satırlarında stok değeri satış fiyatı üzerinden, malzemelerde maliyet üzerinden
+        r["value"] = r["quantity"] * ((r["sale_price"] or 0) if r["product_id"] else r["unit_cost"])
         r["size"] = size_label(r)
     return rows
 
