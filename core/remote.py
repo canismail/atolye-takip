@@ -44,9 +44,39 @@ def _load_url() -> str:
 
 _state["url"] = _load_url()
 
+# Çalışma kipi: "server" (merkezi veritabanı) / "local" (bu bilgisayardaki data/erp.db). Seçim data/mode.txt'te saklanır.
+MODE_FILE = BASE_DIR / "data" / "mode.txt"
+
+
+def _load_mode() -> str:
+    try:
+        return "local" if MODE_FILE.read_text(encoding="utf-8").strip() == "local" else "server"
+    except OSError:
+        return "server"
+
+
+_state["mode"] = _load_mode()
+
+
+def available() -> bool:
+    """Sunucu adresi tanımlı mı (kip anahtarı gösterilebilir mi)?"""
+    return bool(_state["url"])
+
+
+def mode() -> str:
+    return _state["mode"] if available() else "local"
+
+
+def set_mode(m: str) -> None:
+    m = "local" if m == "local" else "server"
+    _state["mode"] = m
+    MODE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MODE_FILE.write_text(m, encoding="utf-8")
+
 
 def enabled() -> bool:
-    return bool(_state["url"])
+    """Sunucu kipi açık mı? Kapalıysa uygulama tamamen yerel SQLite ile çalışır."""
+    return available() and _state["mode"] != "local"
 
 
 def server_url() -> str:

@@ -175,7 +175,7 @@ def render(q: str = "") -> None:
             ["Foto", "Kod", "Bileşen", "Kategori", "Ölçü", "Cins", "Birim Ağırlık", "Birim", "Min. Stok",
              "Kg Fiyatı", "Birim Maliyet", "Stok"],
             money_cols=("Birim Maliyet",),
-            column_config={"Min. Stok": st.column_config.NumberColumn(format="%.2f"),
+            column_config={"Min. Stok": st.column_config.NumberColumn(format="%g"),
                            "Foto": st.column_config.ImageColumn("Foto", width="small")},
             title="Malzeme Bileşenleri",
         )

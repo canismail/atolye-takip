@@ -131,8 +131,8 @@ def render(q: str = "") -> None:
              "Birim Maliyet", "Satış Fiyatı", "Stok Değeri"],
             status_cols=("Durum",), money_cols=("Birim Maliyet", "Satış Fiyatı", "Stok Değeri"),
             column_config={"Foto": st.column_config.ImageColumn("Foto", width="small"),
-                           "Mevcut": st.column_config.NumberColumn(format="%.2f"),
-                           "Min.": st.column_config.NumberColumn(format="%.2f")},
+                           "Mevcut": st.column_config.NumberColumn(format="%g"),
+                           "Min.": st.column_config.NumberColumn(format="%g")},
             title="Stok Listesi",
         )
         if not items:

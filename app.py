@@ -15,12 +15,30 @@ from views import (customers, dashboard, finance, materials, orders, planning, p
 st.set_page_config(page_title="Atölye Yönetim Paneli", page_icon=str(FAVICON_PATH), layout="wide",
                    initial_sidebar_state="expanded")
 
+# ---------------------------------------------------------------- çalışma kipi (sunucu / yerel)
+def _switch_mode(m: str) -> None:
+    remote.set_mode(m)
+    st.session_state.pop("db_ready", None)  # yeni kipte veritabanı yeniden hazırlanır
+
+
+def _mode_toggle(key: str) -> None:
+    if not remote.available():
+        return
+    label = st.radio("Veri kaynağı", ["🌐 Sunucu", "💻 Yerel"], index=0 if remote.enabled() else 1,
+                     horizontal=True, key=key)
+    want = "server" if label.startswith("🌐") else "local"
+    if want != remote.mode():
+        _switch_mode(want)
+        st.rerun()
+
+
 # ---------------------------------------------------------------- sunucu girişi (merkezi veritabanı)
 def _login_screen() -> None:
     _, mid, _ = st.columns([1, 1.2, 1])
     with mid:
         st.markdown("### Atölye Yönetim")
         st.caption(f"Sunucu: {remote.server_url()}")
+        _mode_toggle("mode_login")
         with st.form("login_form"):
             user = st.text_input("Kullanıcı adı")
             pw = st.text_input("Şifre", type="password")
@@ -139,9 +157,12 @@ with st.container(key="topbar"):
                     unsafe_allow_html=True)
         st.button("⚙ Ayarlar", key="prof_settings", on_click=go, args=("settings",), width="stretch")
         st.button("⌂ Dashboard", key="prof_home", on_click=go, args=("dashboard",), width="stretch")
+        _mode_toggle("mode_prof")
         if remote.enabled():
             st.caption(f"Sunucu: {remote.server_url()}")
             st.button("⎋ Çıkış", key="prof_logout", on_click=remote.logout, width="stretch")
+        elif remote.available():
+            st.caption("Yerel mod: veriler bu bilgisayardaki data/erp.db dosyasında.")
 
 if st.session_state.pop("_backup_error", None):
     st.warning("Otomatik yedek alınamadı. Ayarlar sayfasından manuel yedek alabilirsiniz.")
