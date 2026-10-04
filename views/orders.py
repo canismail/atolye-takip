@@ -41,7 +41,9 @@ def order_dialog(wo: dict | None = None, product_id: int | None = None) -> None:
     need = db.query("""SELECT s.name, s.unit, s.quantity AS have, m.quantity*? AS need
                        FROM product_materials m JOIN stock_items s ON s.id=m.stock_id WHERE m.product_id=?""",
                     (qty, pid))
-    st.caption(f"Tahmini üretim süresi: **{num(mins * qty / 60, 1)} saat** ({num(mins)} dk × {num(qty)})")
+    setup_t = db.scalar("SELECT COALESCE(SUM(setup_minutes),0) FROM product_operations WHERE product_id=?", (pid,))
+    st.caption(f"Tahmini üretim süresi: **{num((mins * qty + setup_t) / 60, 1)} saat** ({num(mins)} dk × {num(qty)}"
+               + (f" + {num(setup_t)} dk sök-tak" if setup_t else "") + ")")
     short = [n for n in need if n["need"] > n["have"]]
     if short:
         st.warning("Stok yetersiz: " + ", ".join(
@@ -111,7 +113,7 @@ def render(q: str = "") -> None:
             df["Termin"] = df["due_date"].apply(dmy)
             df["Durum"] = df.apply(lambda r: "Gecikti" if r["status"] in ("Bekliyor", "Üretimde")
                                    and r["due_date"] and r["due_date"] < today else r["status"], axis=1)
-            df["Süre (saat)"] = (df["unit_minutes"] * df["quantity"] / 60).apply(lambda h: f"{num(h, 1)} sa")
+            df["Süre (saat)"] = ((df["unit_minutes"] * df["quantity"] + df["setup_total"]) / 60).apply(lambda h: f"{num(h, 1)} sa")
             df["customer"] = df["customer"].fillna("Stok üretimi")
             df = df.rename(columns={"code": "Sipariş", "customer": "Müşteri", "product": "Ürün",
                                     "quantity": "Adet", "progress": "İlerleme"})

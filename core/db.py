@@ -635,6 +635,7 @@ def products_with_stats() -> list[dict]:
           (SELECT COUNT(*) FROM product_materials m WHERE m.product_id=p.id) AS material_count,
           (SELECT COUNT(*) FROM product_operations o WHERE o.product_id=p.id) AS operation_count,
           (SELECT COALESCE(SUM(o.minutes),0) FROM product_operations o WHERE o.product_id=p.id) AS total_minutes,
+          (SELECT COALESCE(SUM(o.setup_minutes),0) FROM product_operations o WHERE o.product_id=p.id) AS setup_total,
           (SELECT COALESCE(SUM(m.quantity*s.unit_cost),0) FROM product_materials m
               JOIN stock_items s ON s.id=m.stock_id WHERE m.product_id=p.id) AS material_cost
         FROM products p ORDER BY p.code
@@ -826,7 +827,8 @@ def delete_sale(sale_id: int) -> None:
 def work_orders_list() -> list[dict]:
     return query(
         """SELECT w.*, c.name AS customer, p.name AS product,
-                  (SELECT COALESCE(SUM(o.minutes),0) FROM product_operations o WHERE o.product_id=w.product_id) AS unit_minutes
+                  (SELECT COALESCE(SUM(o.minutes),0) FROM product_operations o WHERE o.product_id=w.product_id) AS unit_minutes,
+                  (SELECT COALESCE(SUM(o.setup_minutes),0) FROM product_operations o WHERE o.product_id=w.product_id) AS setup_total
            FROM work_orders w
            LEFT JOIN customers c ON c.id=w.customer_id
            LEFT JOIN products p ON p.id=w.product_id

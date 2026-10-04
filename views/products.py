@@ -148,7 +148,7 @@ def render(q: str = "") -> None:
         if not df.empty:
             if stf != "Tüm Durumlar":
                 df = df[df["status"] == stf]
-            df["Toplam Süre"] = df["total_minutes"].apply(lambda m: f"{num(m)} dk")
+            df["Toplam Süre"] = (df["total_minutes"] + df["setup_total"]).apply(lambda m: f"{num(m)} dk")
             df = df.rename(columns={"code": "Kod", "name": "Ürün", "category": "Kategori",
                                     "material_count": "Malzeme", "operation_count": "Operasyon",
                                     "unit_price": "Satış Fiyatı", "material_cost": "Malzeme Maliyeti",
@@ -182,7 +182,8 @@ def render(q: str = "") -> None:
             f'<div class="erp-small">{esc(product["code"])}</div><br>{badge("● " + product["status"], "green" if product["status"] == "Aktif" else "gray")}'
             + info_rows([
                 ("Kategori", esc(product["category"])),
-                ("Toplam Süre", f"{num(product['total_minutes'])} dk"),
+                ("Toplam Süre", f"{num(product['total_minutes'] + product['setup_total'])} dk"
+                 + (f" (işleme {num(product['total_minutes'])} + sök-tak {num(product['setup_total'])})" if product['setup_total'] else "")),
                 ("Malzeme", f"{product['material_count']} adet"),
                 ("Operasyon", f"{product['operation_count']} adet"),
                 ("Malzeme Maliyeti", money(product["material_cost"])),

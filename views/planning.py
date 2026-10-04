@@ -37,7 +37,7 @@ def _render_general(q: str = "") -> None:
     for w in sorted(orders, key=lambda w: (w["due_date"] or "9999", w["id"])):
         unit = pl.buffered(w["unit_minutes"], P["buffer"])
         rem = pl.remaining_units(w["quantity"], w["progress"])
-        need = rem * unit
+        need = (float(w.get("setup_total") or 0) + rem * unit) if rem > 0 else 0.0
         if unit <= 0:
             sched.append({"w": w, "rem": rem, "need": 0.0, "start": None, "end": None, "state": "Operasyon yok"})
             continue
@@ -89,10 +89,12 @@ def _render_general(q: str = "") -> None:
         rows = []
         for p in products:
             base = float(p["total_minutes"] or 0)
+            setup = float(p.get("setup_total") or 0)
             unit = pl.buffered(base, P["buffer"])
             rows.append({
                 "id": p["id"], "Kod": p["code"], "Ürün": p["name"], "Operasyon": p["operation_count"],
                 "Operasyon Süresi": f"{num(base)} dk" if base else "-",
+                "Sök-Tak": f"{num(setup)} dk" if setup else "-",
                 "Buffer'lı Süre": f"{num(unit)} dk" if base else "-",
                 "Günlük Adet": str(pl.per_day(P["cap"], unit)) if base else "-",
                 "Haftalık Adet": str(pl.per_week(P["cap"], P["week_days"], unit)) if base else "-",
@@ -102,7 +104,7 @@ def _render_general(q: str = "") -> None:
         if not df.empty:
             df = search_filter(df, local, q)
         data_table(df, "plan_products",
-                   ["Kod", "Ürün", "Operasyon", "Operasyon Süresi", "Buffer'lı Süre", "Günlük Adet",
+                   ["Kod", "Ürün", "Operasyon", "Operasyon Süresi", "Sök-Tak", "Buffer'lı Süre", "Günlük Adet",
                     "Haftalık Adet", "Durum"],
                    status_cols=("Durum",), status_colors={"Hazır": "green", "Operasyon yok": "gray"},
                    selectable=False, title="Üretim Kapasitesi")
@@ -124,7 +126,8 @@ def _render_general(q: str = "") -> None:
             qty = c2.number_input("Adet", min_value=1, value=10, step=1, key="plan_qty")
             start_on = c3.date_input("Başlangıç", value=date.today(), format="DD.MM.YYYY", key="plan_start")
             unit = pl.buffered(prod["total_minutes"], P["buffer"])
-            total = qty * unit
+            setup_t = float(prod.get("setup_total") or 0)
+            total = setup_t + qty * unit
             start, end, chunks, _, _ = pl.allocate(total, start_on, 0.0, P["cap"], P["week_days"])
             done = pl.units_done_by_day(chunks, unit)
             m1, m2, m3, m4 = st.columns(4)
@@ -132,7 +135,8 @@ def _render_general(q: str = "") -> None:
             m2.metric("İş günü", f"{len(chunks)} gün")
             m3.metric("Bitiş tarihi", dmy(end))
             m4.metric("Günlük / haftalık", f"{pl.per_day(P['cap'], unit)} / {pl.per_week(P['cap'], P['week_days'], unit)} adet")
-            st.caption(f"1 adet: {num(prod['total_minutes'])} dk + %{num(P['buffer'])} buffer = {num(unit)} dk")
+            st.caption(f"1 adet: {num(prod['total_minutes'])} dk + %{num(P['buffer'])} buffer = {num(unit)} dk"
+                       + (f" · sök-tak (iş emri başına bir kez): {num(setup_t)} dk" if setup_t else ""))
             if chunks:
                 ddf = pd.DataFrame([{"id": i, "Tarih": dmy(d), "Çalışma": f"{num(m / 60)} saat",
                                      "Gün Sonu Tamamlanan": f"{done[i]} adet"} for i, (d, m) in enumerate(chunks)])
