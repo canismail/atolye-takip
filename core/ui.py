@@ -20,6 +20,7 @@ PAGES = {
     "dashboard": ("⌂", "Dashboard"),
     "orders": ("↗", "Siparişler"),
     "planning": ("◷", "Üretim Planı"),
+    "machines": ("▣", "Makineler"),
     "products": ("◇", "Ürünler"),
     "materials": ("▦", "Malzeme Bileşenleri"),
     "stock": ("□", "Stok"),

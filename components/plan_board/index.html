@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { --ink:#1a2433; --muted:#687587; --line:#e3e8ef; --hover:#e8f2ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:transparent; }
+  .wrap { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; }
+  th { padding:8px 10px; text-align:left; border-bottom:2px solid #d9dfe7; white-space:nowrap; position:sticky; top:0; background:#fff; }
+  th.today { color:#1673d1; }
+  td { padding:6px; border-bottom:1px solid #eef0f3; vertical-align:top; min-width:178px; }
+  td.mach { padding:8px 10px; min-width:150px; font-weight:600; white-space:nowrap; background:#fff; position:sticky; left:0; z-index:1; }
+  td.mach small { display:block; font-weight:400; color:var(--muted); font-size:12px; }
+  .drop { min-height:54px; border:2px dashed transparent; border-radius:8px; padding:2px; transition:background .1s,border-color .1s; }
+  .drop.over { background:var(--hover); border-color:#1673d1; }
+  .empty { color:#c3cad4; padding:6px 8px; }
+  .blk { border-left:4px solid; border-radius:6px; padding:5px 8px; margin-bottom:5px; font-size:13px; background:#eee; user-select:none; }
+  .blk.drag { cursor:grab; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+  .blk.drag:active { cursor:grabbing; }
+  .blk.dragging { opacity:.35; }
+  .blk .t { font-weight:700; }
+  .blk .sub { color:#556070; font-size:12px; }
+  .blk .pin { float:right; font-size:12px; }
+  .blk.cont { opacity:.75; border-left-style:dotted; }
+  .hint { color:var(--muted); font-size:12px; margin:6px 2px 0; }
+</style>
+</head>
+<body>
+<div class="wrap" id="root"></div>
+<div class="hint" id="hint"></div>
+<script>
+(function () {
+  var args = null, dragKey = null;
+  function send(type, extra) {
+    var m = { isStreamlitMessage: true, type: type };
+    for (var k in extra) m[k] = extra[k];
+    window.parent.postMessage(m, "*");
+  }
+  function frame() { send("streamlit:setFrameHeight", { height: Math.max(120, document.body.offsetHeight + 4) }); }
+  function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function render() {
+    var root = document.getElementById("root");
+    root.innerHTML = "";
+    if (!args) return;
+    var days = args.days || [], machines = args.machines || [], blocks = args.blocks || [];
+    var t = el("table"), thead = el("thead"), hr = el("tr");
+    hr.appendChild(el("th", null, "Makine"));
+    days.forEach(function (d) { hr.appendChild(el("th", d.today ? "today" : "", esc(d.label) + (d.today ? " · bugün" : ""))); });
+    thead.appendChild(hr); t.appendChild(thead);
+    var tb = el("tbody");
+    machines.forEach(function (m) {
+      var tr = el("tr");
+      tr.appendChild(el("td", "mach", esc(m.name) + "<small>" + esc(m.hours) + " saat/gün</small>"));
+      days.forEach(function (d) {
+        var td = el("td"), zone = el("div", "drop");
+        zone.dataset.machine = m.id; zone.dataset.day = d.iso;
+        var here = blocks.filter(function (b) { return b.machine_id === m.id && b.day === d.iso; })
+                         .sort(function (a, b) { return a.order - b.order; });
+        if (!here.length) zone.appendChild(el("div", "empty", "—"));
+        here.forEach(function (b) {
+          var d1 = el("div", "blk" + (b.draggable ? " drag" : "") + (b.cont ? " cont" : ""));
+          d1.style.background = b.bg; d1.style.borderLeftColor = b.border;
+          d1.title = b.note || "";
+          d1.innerHTML = (b.pinned ? '<span class="pin" title="Elle yerleştirildi">📌</span>' : "") +
+            '<span class="t">' + esc(b.time) + "</span> · " + esc(b.label) +
+            '<div class="sub">' + esc(b.sub) + "</div>";
+          if (b.draggable) {
+            d1.draggable = true;
+            d1.addEventListener("dragstart", function (ev) {
+              dragKey = b.key; d1.classList.add("dragging");
+              ev.dataTransfer.setData("text/plain", b.key); ev.dataTransfer.effectAllowed = "move";
+            });
+            d1.addEventListener("dragend", function () { d1.classList.remove("dragging"); dragKey = null; });
+          }
+          zone.appendChild(d1);
+        });
+        zone.addEventListener("dragover", function (ev) { if (dragKey) { ev.preventDefault(); zone.classList.add("over"); } });
+        zone.addEventListener("dragleave", function () { zone.classList.remove("over"); });
+        zone.addEventListener("drop", function (ev) {
+          ev.preventDefault(); zone.classList.remove("over");
+          var key = dragKey || ev.dataTransfer.getData("text/plain");
+          if (!key) return;
+          var b = blocks.filter(function (x) { return x.key === key; })[0];
+          if (b && b.machine_id === m.id && b.day === d.iso) return; // aynı yere bırakıldı
+          send("streamlit:setComponentValue", {
+            dataType: "json",
+            value: { key: key, machine_id: m.id, day: d.iso, nonce: Date.now() + "-" + Math.random().toString(36).slice(2) }
+          });
+        });
+        td.appendChild(zone); tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); root.appendChild(t);
+    document.getElementById("hint").textContent = args.hint || "";
+    frame();
+  }
+
+  window.addEventListener("message", function (ev) {
+    if (ev.data && ev.data.type === "streamlit:render") { var a = ev.data.args || {}; args = a.model || a; render(); }
+  });
+  send("streamlit:componentReady", { apiVersion: 1 });
+  frame();
+})();
+</script>
+</body>
+</html>

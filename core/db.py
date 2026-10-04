@@ -85,6 +85,25 @@ CREATE TABLE IF NOT EXISTS product_operations (
     minutes    REAL NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS machines (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    type        TEXT NOT NULL DEFAULT 'Torna',
+    daily_hours REAL NOT NULL DEFAULT 8,
+    active      INTEGER NOT NULL DEFAULT 1,
+    note        TEXT,
+    changeover_minutes REAL NOT NULL DEFAULT 120
+);
+
+CREATE TABLE IF NOT EXISTS plan_overrides (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_order_id INTEGER NOT NULL,
+    op_id       INTEGER NOT NULL,
+    machine_id  INTEGER,
+    day         TEXT,
+    UNIQUE(work_order_id, op_id)
+);
+
 CREATE TABLE IF NOT EXISTS customers (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     code       TEXT UNIQUE NOT NULL,
@@ -161,6 +180,7 @@ DEFAULT_SETTINGS = {
     "plan_week_days": "5",
     "plan_buffer_pct": "15",
     "plan_workers": "1",
+    "plan_shift_start": "08:00",
     "material_types": json.dumps([
         {"name": "1040 (Çelik)", "density": 7.85},
         {"name": "1050 (Çelik)", "density": 7.85},
@@ -181,6 +201,12 @@ STOCK_MIGRATIONS = [
     ("kg_price", "REAL"), ("in_stock", "INTEGER NOT NULL DEFAULT 0"), ("product_id", "INTEGER"), ("image", "TEXT"),
 ]
 PRODUCT_MIGRATIONS = [("image", "TEXT")]
+MACHINE_MIGRATIONS = [("changeover_minutes", "REAL NOT NULL DEFAULT 120")]  # parça ayarlama süresi (dk)
+# Operasyon: hangi makine türünde yapılır, sök-tak (hazırlık) süresi, hangi parçaya ait (parallel artık kullanılmıyor)
+OPERATION_MIGRATIONS = [("machine_type", "TEXT"), ("setup_minutes", "REAL NOT NULL DEFAULT 0"),
+                        ("parallel", "INTEGER NOT NULL DEFAULT 0"), ("part", "TEXT")]
+DEFAULT_MACHINES = [("Torna 1", "Torna"), ("Torna 2", "Torna"),
+                    ("3 Eksen İşleme Merkezi", "3 Eksen"), ("4 Eksen İşleme Merkezi", "4 Eksen")]
 UNITS = ["adet", "kg", "gr", "lt", "metre", "paket", "takım"]
 PRODUCT_CATEGORIES = ["Metal Ürün", "Yedek Parça", "Makine", "Diğer"]
 INCOME_CATEGORIES = ["Satış", "Hizmet", "Faiz", "Diğer Gelir"]
@@ -194,7 +220,8 @@ SALE_STATUSES = ["Bekliyor", "Ödendi"]
 # Sunucu adresi tanımlıysa (core/remote.py) okumalar sunucudan alınan bir anlık görüntü (bellek içi SQLite) üzerinden,
 # yazmalar ise sunucudaki servis çağrılarıyla yapılır. Böylece telefon ve bilgisayar aynı veriyi kullanır.
 BACKUP_TABLES = ["settings", "customers", "products", "stock_items", "stock_movements",
-                 "product_materials", "product_operations", "sales", "transactions", "work_orders"]
+                 "product_materials", "product_operations", "sales", "transactions", "work_orders",
+                 "machines", "plan_overrides"]
 SNAP_TTL = 6  # sn: başka cihazlardaki değişiklikler en geç bu kadar sonra görünür
 _snap: dict = {"conn": None, "ts": 0.0, "dirty": True}
 _snap_lock = threading.RLock()
@@ -269,6 +296,16 @@ def init_db() -> None:
     with get_conn() as c:
         _init_schema(c)
         _seed_material_type(c, "1050 (Çelik)", 7.85, "seed_mt_1050")
+        _seed_machines(c)
+
+
+def _seed_machines(c: sqlite3.Connection) -> None:
+    """Atölyenin 4 makinesini ilk kurulumda bir kez ekler (sonradan silinirse geri gelmez)."""
+    if c.execute("SELECT 1 FROM settings WHERE key='seed_machines'").fetchone():
+        return
+    if c.execute("SELECT COUNT(*) FROM machines").fetchone()[0] == 0:
+        c.executemany("INSERT INTO machines(name, type, daily_hours, active) VALUES (?,?,8,1)", DEFAULT_MACHINES)
+    c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('seed_machines', '1')")
 
 
 def _seed_material_type(c: sqlite3.Connection, name: str, density: float, flag: str) -> None:
@@ -301,6 +338,14 @@ def _init_schema(c: sqlite3.Connection) -> None:
         for col, ddl in PRODUCT_MIGRATIONS:
             if col not in have_p:
                 c.execute(f"ALTER TABLE products ADD COLUMN {col} {ddl}")
+        have_o = {r[1] for r in c.execute("PRAGMA table_info(product_operations)")}
+        for col, ddl in OPERATION_MIGRATIONS:
+            if col not in have_o:
+                c.execute(f"ALTER TABLE product_operations ADD COLUMN {col} {ddl}")
+        have_m = {r[1] for r in c.execute("PRAGMA table_info(machines)")}
+        for col, ddl in MACHINE_MIGRATIONS:
+            if col not in have_m:
+                c.execute(f"ALTER TABLE machines ADD COLUMN {col} {ddl}")
         # eski kategoriler (Sarf, Kimyasal, Yarı Mamul...) yeni listeye taşınır
         marks = ",".join("?" * len(STOCK_CATEGORIES))
         c.execute(f"UPDATE stock_items SET category='Diğer' WHERE product_id IS NULL AND category NOT IN ({marks})",
@@ -938,16 +983,107 @@ def save_product_material(product_id: int, stock_id: int, qty: float, row_id: in
                 (product_id, stock_id, qty, seq))
 
 
-def save_operation(product_id: int, name: str, minutes: float, row_id: int | None = None) -> None:
+def save_operation(product_id: int, name: str, minutes: float, row_id: int | None = None,
+                   machine_type: str | None = None, setup_minutes: float = 0.0, part: str | None = None) -> None:
+    """Sunucu modunda makine türü ve sök-tak sunucuya gider ("parça" alanı yalnız yerelde tutulur)."""
     if remote.enabled():
-        _rpc("products", "saveOperation", product_id, name.strip(), minutes, _opt(row_id))
+        _rpc("products", "saveOperation", product_id, name.strip(), minutes, _opt(row_id),
+             (machine_type or "").strip(), float(setup_minutes or 0))
         return
+    mt = (machine_type or "").strip() or None
+    pt = (part or "").strip() or None
     if row_id is not None:
-        execute("UPDATE product_operations SET name=?, minutes=? WHERE id=?", (name.strip(), minutes, row_id))
+        execute("UPDATE product_operations SET name=?, minutes=?, machine_type=?, setup_minutes=?, part=? WHERE id=?",
+                (name.strip(), minutes, mt, setup_minutes, pt, row_id))
         return
     seq = scalar("SELECT COALESCE(MAX(seq),0)+1 FROM product_operations WHERE product_id=?", (product_id,))
-    execute("INSERT INTO product_operations(product_id, seq, name, minutes) VALUES (?,?,?,?)",
-            (product_id, seq, name.strip(), minutes))
+    execute("INSERT INTO product_operations(product_id, seq, name, minutes, machine_type, setup_minutes, part) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (product_id, seq, name.strip(), minutes, mt, setup_minutes, pt))
+
+
+# ---------------------------------------------------------------- makineler
+_local_schema_ok = False
+
+
+def _ensure_local_schema() -> None:
+    """Uygulama açıkken kod güncellendiyse (yeni tablo/sütun) yerel şemayı bir kez tamamlar."""
+    global _local_schema_ok
+    if _local_schema_ok or remote.enabled():
+        return
+    with get_conn() as c:
+        _init_schema(c)
+        _seed_machines(c)
+    _local_schema_ok = True
+
+
+def machines_list(active_only: bool = False) -> list[dict]:
+    _ensure_local_schema()
+    return query("SELECT * FROM machines" + (" WHERE active=1" if active_only else "") + " ORDER BY type, name, id")
+
+
+def machine_types() -> list[str]:
+    """Tanımlı makine türleri (operasyonlarda seçilir)."""
+    return [r["type"] for r in query("SELECT DISTINCT type FROM machines ORDER BY type")]
+
+
+def save_machine(name: str, mtype: str, daily_hours: float, active: bool, note: str = "",
+                 row_id: int | None = None, changeover_minutes: float = 120.0) -> None:
+    if remote.enabled():
+        _rpc("machines", "save", {"name": name, "type": mtype, "daily_hours": float(daily_hours), "active": bool(active),
+                                  "note": note, "changeover_minutes": float(changeover_minutes)}, _opt(row_id))
+        return
+    vals = (name.strip(), mtype.strip(), float(daily_hours), int(bool(active)), note.strip() or None,
+            max(0.0, float(changeover_minutes)))
+    if row_id is None:
+        execute("INSERT INTO machines(name, type, daily_hours, active, note, changeover_minutes) VALUES (?,?,?,?,?,?)", vals)
+    else:
+        execute("UPDATE machines SET name=?, type=?, daily_hours=?, active=?, note=?, changeover_minutes=? WHERE id=?",
+                (*vals, row_id))
+
+
+# ---------------------------------------------------------------- elle plan değişiklikleri
+def plan_overrides() -> list[dict]:
+    _ensure_local_schema()
+    return query("SELECT * FROM plan_overrides ORDER BY id")
+
+
+def set_plan_override(work_order_id: int, op_id: int, machine_id: int | None, day: str | None) -> None:
+    if remote.enabled():
+        _rpc("machines", "setOverride", work_order_id, op_id, _opt(machine_id), _opt(day))
+        return
+    _ensure_local_schema()
+    execute("INSERT INTO plan_overrides(work_order_id, op_id, machine_id, day) VALUES (?,?,?,?) "
+            "ON CONFLICT(work_order_id, op_id) DO UPDATE SET machine_id=excluded.machine_id, day=excluded.day",
+            (work_order_id, op_id, machine_id, day))
+
+
+def clear_plan_override(work_order_id: int, op_id: int) -> None:
+    if remote.enabled():
+        _rpc("machines", "clearOverride", work_order_id, op_id)
+        return
+    execute("DELETE FROM plan_overrides WHERE work_order_id=? AND op_id=?", (work_order_id, op_id))
+
+
+def clear_plan_overrides() -> None:
+    if remote.enabled():
+        _rpc("machines", "clearOverrides")
+        return
+    execute("DELETE FROM plan_overrides")
+
+
+def set_machine_active(machine_id: int, active: bool) -> None:
+    if remote.enabled():
+        _rpc("machines", "setActive", machine_id, bool(active))
+        return
+    execute("UPDATE machines SET active=? WHERE id=?", (int(bool(active)), machine_id))
+
+
+def delete_machine(machine_id: int) -> None:
+    if remote.enabled():
+        _rpc("machines", "remove", machine_id)
+        return
+    execute("DELETE FROM machines WHERE id=?", (machine_id,))
 
 
 def delete_row(table: str, product_id: int, row_id: int) -> None:
@@ -1033,6 +1169,8 @@ def _backup_json_from_sqlite(path: Path) -> dict:
     try:
         have = {r[0] for r in src.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         tables = {t: [dict(r) for r in src.execute(f"SELECT * FROM {t}")] for t in BACKUP_TABLES if t in have}
+        for r in tables.get("product_operations", []):
+            r.pop("part", None)  # sunucuda yok
     finally:
         src.close()
     return {"app": "atolye-yonetim", "version": 1, "exported_at": datetime.now().isoformat(), "tables": tables}

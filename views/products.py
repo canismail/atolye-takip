@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from core import db, images
+from core import db, images, remote
 from core.ui import (badge, bump, card_title, confirm_delete, data_table, empty, esc, flash,
                      info_rows, photo_input, resolve_photo, search_filter)
 from core.utils import dmy, money, num
@@ -86,7 +86,23 @@ def material_dialog(product: dict, row: dict | None = None) -> None:
 @st.dialog("Operasyon")
 def operation_dialog(product: dict, row: dict | None = None) -> None:
     name = st.text_input("Operasyon Adı *", value=row["name"] if row else "", placeholder="Örn. Kaynak")
-    mins = st.number_input("Süre (dakika)", min_value=0.0, value=float(row["minutes"]) if row else 10.0, step=5.0)
+    mins = st.number_input("Süre (dakika / adet)", min_value=0.0, value=float(row["minutes"]) if row else 10.0, step=5.0)
+    mtype, setup, part = None, 0.0, None
+    if True:  # makine alanları her iki modda
+        types = db.machine_types()
+        opts = ["Herhangi bir makine"] + types
+        cur = (row or {}).get("machine_type")
+        mt = st.selectbox("Makine türü", opts, index=opts.index(cur) if cur in opts else 0,
+                          help="Operasyonun yapılacağı makine türü. Planlayıcı, bu türdeki aktif makinelerden "
+                               "en erken boşalanı seçer.")
+        mtype = None if mt == opts[0] else mt
+        setup = st.number_input("Sök-tak / hazırlık süresi (dakika)", min_value=0.0, step=5.0,
+                                value=float((row or {}).get("setup_minutes") or 0),
+                                help="0 bırakırsanız makinenin varsayılan parça ayarlama süresi (Makineler sayfası, "
+                                     "varsayılan 2 saat) uygulanır. Doluysa bu operasyon için o süre kullanılır. "
+                                     "Her iş emrinde bir kez, adet sayısından bağımsız eklenir.")
+        st.caption("Operasyon sırası korunur: her operasyon önceki operasyonlar bitince başlar. Arka arkaya gelen aynı "
+                   "türdeki operasyonlar (ör. iki tornalama) farklı makinelerde aynı anda yapılabilir.")
     f1, f2 = st.columns(2)
     if f1.button("Vazgeç", width="stretch"):
         st.rerun()
@@ -94,7 +110,7 @@ def operation_dialog(product: dict, row: dict | None = None) -> None:
         if not name.strip():
             st.error("Operasyon adı zorunludur.")
             return
-        db.save_operation(product["id"], name, mins, row["id"] if row else None)
+        db.save_operation(product["id"], name, mins, row["id"] if row else None, mtype, setup, part)
         flash("Operasyon kaydedildi.")
         bump("ops")
         st.rerun()
@@ -223,8 +239,11 @@ def render(q: str = "") -> None:
             if not odf.empty:
                 odf["Süre"] = odf["minutes"].apply(lambda m: f"{num(m)} dk")
                 odf = odf.rename(columns={"seq": "Sıra", "name": "Operasyon"})
+                if True:
+                    odf["Makine"] = odf["machine_type"].fillna("Herhangi")
+                    odf["Sök-Tak"] = odf["setup_minutes"].apply(lambda m: f"{num(m)} dk" if m else "-")
             osel = data_table(odf, f"ops{product['id']}_{st.session_state.get('_nonce_ops', 0)}",
-                              ["Sıra", "Operasyon", "Süre"],
+                              ["Sıra", "Operasyon", "Makine", "Süre", "Sök-Tak"],
                               title=f"{product['name']} - Operasyonlar")
             if ops:
                 st.caption(f"Toplam süre: **{num(sum(o['minutes'] for o in ops))} dk**")

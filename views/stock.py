@@ -94,12 +94,23 @@ def render(q: str = "") -> None:
     items = db.stock_items(in_stock=True, with_products=True)
     kpis([
         {"icon": "□", "color": "blue", "label": "Stok Kalemi", "value": num(len(items))},
-        {"icon": "₺", "color": "green", "label": "Stok Değeri", "value": money(metrics.stock_value())},
         {"icon": "!", "color": "red", "label": "Kritik Stok",
          "value": num(sum(1 for i in items if i["status"] == "Kritik"))},
         {"icon": "!", "color": "yellow", "label": "Minimuma Yakın",
          "value": num(sum(1 for i in items if i["status"] == "Minimuma Yakın"))},
-    ])
+    ], cols=3)
+    # Toplam maliyet: miktar × birim maliyet · Toplam satış değeri: ürünlerde miktar × satış fiyatı
+    # (malzemelerin satış fiyatı olmadığından maliyetiyle sayılır) · Net kâr: ikisinin farkı
+    total_cost = sum(i["quantity"] * i["unit_cost"] for i in items)
+    total_sale = sum(i["value"] for i in items)
+    net = total_sale - total_cost
+    kpis([
+        {"icon": "₺", "color": "purple", "label": "Toplam Maliyet", "value": money(total_cost)},
+        {"icon": "₺", "color": "green", "label": "Toplam Satış Değeri", "value": money(total_sale)},
+        {"icon": "▤", "color": "green" if net >= 0 else "red", "label": "Net Kâr", "value": money(net),
+         "change": (f"%{net / total_cost * 100:,.0f}".replace(",", ".") if total_cost > 0 else ""),
+         "trend": "up" if net >= 0 else "down"},
+    ], cols=3)
 
     with st.container(key="card_stock_list"):
         h = st.columns([2.2, 2, 1.4, 1.4, 1.3], vertical_alignment="center")
