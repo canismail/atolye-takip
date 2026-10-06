@@ -9,6 +9,18 @@ MONTHS_LONG = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz",
                "Eylül", "Ekim", "Kasım", "Aralık"]
 
 _symbol = "₺"
+_hidden = False
+MASK = "••••"
+
+
+def set_hidden(v: bool) -> None:
+    """Hassas (parasal) verileri gizler: money() maskeli metin döndürür."""
+    global _hidden
+    _hidden = bool(v)
+
+
+def is_hidden() -> bool:
+    return _hidden
 
 
 def set_currency(code: str) -> None:
@@ -26,6 +38,8 @@ def num(x: float | int | None, decimals: int = 2) -> str:
 
 
 def money(x: float | int | None, sign: bool = False) -> str:
+    if _hidden:
+        return f"{_symbol}{MASK}"
     x = float(x or 0)
     prefix = "-" if x < 0 else ("+" if sign and x > 0 else "")
     return f"{prefix}{_symbol}{num(abs(x))}"

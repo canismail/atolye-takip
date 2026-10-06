@@ -9,7 +9,7 @@ import streamlit as st
 
 from core import db, metrics
 from core.ui import card_title, data_table, esc, info_rows, kpis, progress, search_filter
-from core.utils import MONTHS_LONG, MONTHS_SHORT, month_label, money, num
+from core.utils import MONTHS_LONG, MONTHS_SHORT, is_hidden, month_label, money, num
 
 
 def _excel(sheets: dict[str, pd.DataFrame]) -> bytes:
@@ -72,7 +72,7 @@ def render(q: str = "") -> None:
             card_title("En Çok Satan Ürünler")
         year = h[1].selectbox("Yıl", years, key="rep_year_top", label_visibility="collapsed")
         top = _top_df(year)
-        h[2].download_button("Excel'e Aktar", data=_excel({"En Çok Satan": top}),
+        h[2].download_button("Excel'e Aktar", data=_excel({"En Çok Satan": top}), disabled=is_hidden(),
                              file_name=f"en_cok_satan_{year}.xlsx", width="stretch",
                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         if not top.empty:
@@ -125,7 +125,7 @@ def render(q: str = "") -> None:
                                   "Mevcut": s["quantity"], "Min.": s["min_qty"], "Durum": s["status"],
                                   "Birim Maliyet": s["unit_cost"], "Stok Değeri": s["value"]}
                                  for s in db.stock_items(in_stock=True, with_products=True)])
-        h[1].download_button("Tüm Raporu Excel'e Aktar",
+        h[1].download_button("Tüm Raporu Excel'e Aktar", disabled=is_hidden(),
                              data=_excel({"Aylık Özet": full, "En Çok Satan": _top_df(y2), "Satışlar": sales_df,
                                           "Gelir-Gider": tx_df, "Stok": stock_df}),
                              file_name=f"atolye_rapor_{y2}.xlsx", width="stretch",
@@ -149,4 +149,7 @@ def render(q: str = "") -> None:
             )
             .properties(height=260).configure_view(strokeWidth=0)
         )
-        st.altair_chart(chart, use_container_width=True)
+        if is_hidden():
+            st.caption("Grafik gizli (hassas veri). Sağ üstten **🔒 Göster** ile açın.")
+        else:
+            st.altair_chart(chart, use_container_width=True)

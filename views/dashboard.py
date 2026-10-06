@@ -6,7 +6,7 @@ import streamlit as st
 
 from core import db, metrics
 from core.ui import badge, card_title, esc, info_rows, kpis, mini_table, nav_button, progress
-from core.utils import MONTHS_SHORT, change_pct, dmy, money, num, prev_month_key, tr_lower
+from core.utils import MONTHS_SHORT, change_pct, dmy, is_hidden, money, num, prev_month_key, tr_lower
 
 
 def _trend(p: float | None, suffix: str = "") -> tuple[str, str]:
@@ -74,10 +74,13 @@ def render(q: str = "") -> None:
             .properties(height=245)
             .configure_view(strokeWidth=0)
         )
-        st.altair_chart(chart, use_container_width=True)
+        if is_hidden():
+            st.caption("Satış grafiği gizli (hassas veri). Sağ üstten **🔒 Göster** ile açın.")
+        else:
+            st.altair_chart(chart, use_container_width=True)
 
     with right.container(key="card_dash_tx"):
-        h1, h2 = st.columns([2, 1], vertical_alignment="center")
+        h1, h2 = st.columns([1, 1], vertical_alignment="center")
         with h1:
             card_title("Son İşlemler")
         with h2:
@@ -94,7 +97,7 @@ def render(q: str = "") -> None:
 
     c1, c2, c3 = st.columns(3)
     with c1.container(key="card_dash_stock"):
-        h1, h2 = st.columns([2, 1], vertical_alignment="center")
+        h1, h2 = st.columns([1, 1], vertical_alignment="center")
         with h1:
             card_title("Kritik Stoklar")
         with h2:
@@ -104,7 +107,7 @@ def render(q: str = "") -> None:
                     for s in items[:6]], "Kritik stok yok. 👍")
 
     with c2.container(key="card_dash_orders"):
-        h1, h2 = st.columns([2, 1], vertical_alignment="center")
+        h1, h2 = st.columns([1, 1], vertical_alignment="center")
         with h1:
             card_title("Bekleyen Siparişler")
         with h2:
@@ -115,7 +118,7 @@ def render(q: str = "") -> None:
                     for w in wos[:6]], "Bekleyen sipariş yok.")
 
     with c3.container(key="card_dash_cari"):
-        h1, h2 = st.columns([2, 1], vertical_alignment="center")
+        h1, h2 = st.columns([1, 1], vertical_alignment="center")
         with h1:
             card_title("Cari Özet")
         with h2:

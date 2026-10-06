@@ -8,7 +8,8 @@ import streamlit as st
 
 from core import db, remote
 from core.ui import FAVICON_PATH, LOGO_PATH, PAGES, esc, go, inject_css, show_flash
-from core.utils import dmy, initials, money, set_currency
+from core import privacy
+from core.utils import dmy, initials, money, set_currency, set_hidden
 from views import (customers, dashboard, finance, machines, materials, orders, planning, products,
                    reports, sales, settings, stock)
 
@@ -136,13 +137,33 @@ def alerts() -> list[str]:
 
 
 # ---------------------------------------------------------------- topbar
+@st.dialog("Gizli verileri göster")
+def _unlock_dialog() -> None:
+    pw = st.text_input("Şifre", type="password", placeholder="Şifre", key="priv_pw")
+    c1, c2 = st.columns(2)
+    if c1.button("Vazgeç", width="stretch", key="priv_cancel"):
+        st.rerun()
+    if c2.button("Göster", type="primary", width="stretch", key="priv_ok"):
+        if privacy.check(pw):
+            privacy.set_hidden(False)
+            st.rerun()
+        st.error("Şifre hatalı.")
+
+
+set_hidden(privacy.is_hidden())
 page = st.session_state.page
 with st.container(key="topbar"):
-    c_title, c_search, c_bell, c_prof = st.columns([3, 3.2, 0.8, 1.6], vertical_alignment="center")
+    c_title, c_search, c_eye, c_bell, c_prof = st.columns([3, 3.2, 1.1, 0.8, 1.6], vertical_alignment="center")
     c_title.markdown(f'<h1 class="erp-title">{esc(PAGES[page][1])}</h1>', unsafe_allow_html=True)
     c_search.text_input("Ara", key="global_search", placeholder="Ara...  ⌕",
                         label_visibility="collapsed",
                         help="Açık sayfadaki tüm tablolarda arar")
+    if not privacy.is_hidden():
+        if c_eye.button("🙈 Gizle", key="priv_hide", width="stretch", help="Parasal verileri gizler"):
+            privacy.set_hidden(True)
+            st.rerun()
+    elif c_eye.button("🔒 Göster", key="priv_show", width="stretch", help="Şifre ile gizli verileri açar"):
+        _unlock_dialog()
     notes = alerts()
     with c_bell.popover(f"🔔 {len(notes)}" if notes else "🔔"):
         st.markdown("**Bildirimler**")

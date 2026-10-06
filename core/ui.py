@@ -72,6 +72,12 @@ section[data-testid="stSidebar"] *{color:#c7d1dd;}
 
 /* ---------- topbar ---------- */
 .st-key-topbar{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 18px;margin-bottom:6px;}
+.st-key-topbar button{min-height:38px;white-space:nowrap;padding:0 10px;}
+[class*="st-key-dash_"]{display:flex;justify-content:flex-end;}
+[class*="st-key-dash_"] button{min-height:32px;padding:2px 14px;border:0;border-radius:16px;background:#eaf1fb;color:var(--blue);
+  font-size:13px;font-weight:600;white-space:nowrap;width:auto;}
+[class*="st-key-dash_"] button:hover{background:#dbe8fa;color:var(--blue);}
+[class*="st-key-dash_"] button p{white-space:nowrap;font-size:13px;font-weight:600;}
 .erp-title{font-size:26px;font-weight:700;color:var(--text);margin:0;line-height:38px;}
 .erp-profile{display:flex;align-items:center;gap:8px;justify-content:flex-end;height:38px;color:var(--text);}
 .erp-avatar{width:34px;height:34px;border-radius:50%;background:#5d7fa8;color:#fff;display:grid;place-items:center;font-weight:600;font-size:13px;}
@@ -130,7 +136,7 @@ def go(page: str) -> None:
 
 def nav_button(label: str, page: str, key: str) -> None:
     """Sayfa değiştiren buton (ör. 'Tümünü Gör')."""
-    st.button(label, key=key, on_click=go, args=(page,))
+    st.button(label if label.endswith("→") else f"{label} →", key=key, on_click=go, args=(page,))
 
 
 # ---------------------------------------------------------------- bildirim

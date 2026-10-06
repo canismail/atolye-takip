@@ -359,7 +359,7 @@ def _gantt(plan: dict, shift: int = 8 * 60) -> None:
              .encode(x=alt.X("Başlangıç:T", title=None), x2="Bitiş:T", y=alt.Y("Makine:N", title=None),
                      color=alt.Color("Sipariş:N"), tooltip=["Sipariş", "Operasyon", "Makine", "Başlangıç", "Bitiş"])
              .properties(height=max(120, 46 * df["Makine"].nunique())))
-    st.altair_chart(chart, width="stretch")
+    st.altair_chart(chart, use_container_width=True)
     st.caption("Çubuklar işin makinede geçtiği aralığı gösterir; gece ve hafta sonu boşlukları işin ertesi iş gününe "
                "devrettiğini gösterir.")
 
